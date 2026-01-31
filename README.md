@@ -1,9 +1,9 @@
-# 🦞 OpenClaw — Personal AI Assistant
+# 🦞 MoltBot — Personal AI Assistant 
 
 <p align="center">
     <picture>
-        <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/openclaw/openclaw/main/docs/assets/openclaw-logo-text-dark.png">
-        <img src="https://raw.githubusercontent.com/openclaw/openclaw/main/docs/assets/openclaw-logo-text.png" alt="OpenClaw" width="500">
+        <source media="(prefers-color-scheme: light)" srcset="https://img.wia.pub/moltbot/moltbot-logo-text-light.png">
+        <img src="https://img.wia.pub/moltbot/moltbot-logo-text-dark.png" alt="MoltBot" width="500">
     </picture>
 </p>
 
@@ -227,7 +227,7 @@ It’s perfectly fine to run the Gateway on a small Linux instance. Clients (mac
 
 - **Gateway host** runs the exec tool and channel connections by default.
 - **Device nodes** run device‑local actions (`system.run`, camera, screen recording, notifications) via `node.invoke`.
-  In short: exec runs where the Gateway lives; device actions run where the device lives.
+In short: exec runs where the Gateway lives; device actions run where the device lives.
 
 Details: [Remote access](https://docs.openclaw.ai/gateway/remote) · [Nodes](https://docs.openclaw.ai/nodes) · [Security](https://docs.openclaw.ai/gateway/security)
 
