@@ -2,6 +2,10 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.2.1
+
+- run as bun.js
+
 ## 2026.1.31
 
 ### Changes
