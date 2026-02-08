@@ -13,7 +13,7 @@ type AnthropicAuthDefaultsMode = "api_key" | "oauth";
 
 const DEFAULT_MODEL_ALIASES: Readonly<Record<string, string>> = {
   // Anthropic (pi-ai catalog uses "latest" ids without date suffix)
-  opus: "anthropic/claude-opus-4-5",
+  opus: "anthropic/claude-opus-4-6",
   sonnet: "anthropic/claude-sonnet-4-5",
 
   // OpenAI
@@ -392,12 +392,12 @@ export function applyContextPruningDefaults(cfg: OpenClawConfig): OpenClawConfig
       }
       const current = entry ?? {};
       const params = (current as { params?: Record<string, unknown> }).params ?? {};
-      if (typeof params.cacheControlTtl === "string") {
+      if (typeof params.cacheRetention === "string") {
         continue;
       }
       nextModels[key] = {
         ...(current as Record<string, unknown>),
-        params: { ...params, cacheControlTtl: "1h" },
+        params: { ...params, cacheRetention: "short" },
       };
       modelsMutated = true;
     }
@@ -410,10 +410,10 @@ export function applyContextPruningDefaults(cfg: OpenClawConfig): OpenClawConfig
         const entry = nextModels[key];
         const current = entry ?? {};
         const params = (current as { params?: Record<string, unknown> }).params ?? {};
-        if (typeof params.cacheControlTtl !== "string") {
+        if (typeof params.cacheRetention !== "string") {
           nextModels[key] = {
             ...(current as Record<string, unknown>),
-            params: { ...params, cacheControlTtl: "1h" },
+            params: { ...params, cacheRetention: "short" },
           };
           modelsMutated = true;
         }
