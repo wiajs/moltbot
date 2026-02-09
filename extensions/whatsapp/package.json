@@ -1,12 +1,12 @@
 {
-  "name": "@openclaw/whatsapp",
+  "name": "@moltbot/whatsapp",
   "version": "2026.2.6-3",
-  "description": "OpenClaw WhatsApp channel plugin",
+  "description": "Moltbot WhatsApp channel plugin",
   "type": "module",
   "devDependencies": {
-    "openclaw": "workspace:*"
+    "moltbot": "file:../../"
   },
-  "openclaw": {
+  "moltbot": {
     "extensions": [
       "./index.ts"
     ]

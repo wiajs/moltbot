@@ -1,12 +1,12 @@
 {
-  "name": "@openclaw/minimax-portal-auth",
+  "name": "@moltbot/minimax-portal-auth",
   "version": "2026.2.6-3",
-  "description": "OpenClaw MiniMax Portal OAuth provider plugin",
+  "description": "Moltbot MiniMax Portal OAuth provider plugin",
   "type": "module",
   "devDependencies": {
-    "openclaw": "workspace:*"
+    "moltbot": "file:../../"
   },
-  "openclaw": {
+  "moltbot": {
     "extensions": [
       "./index.ts"
     ]

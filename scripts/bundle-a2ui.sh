@@ -2,8 +2,8 @@
 set -euo pipefail
 
 on_error() {
-  echo "A2UI bundling failed. Re-run with: pnpm canvas:a2ui:bundle" >&2
-  echo "If this persists, verify pnpm deps and try again." >&2
+  echo "A2UI bundling failed. Re-run with: bun canvas:a2ui:bundle" >&2
+  echo "If this persists, verify bun deps and try again." >&2
 }
 trap on_error ERR
 
@@ -22,13 +22,14 @@ fi
 
 INPUT_PATHS=(
   "$ROOT_DIR/package.json"
-  "$ROOT_DIR/pnpm-lock.yaml"
+  "$ROOT_DIR/bun.lockb"
   "$A2UI_RENDERER_DIR"
   "$A2UI_APP_DIR"
 )
 
 compute_hash() {
-  ROOT_DIR="$ROOT_DIR" node --input-type=module - "${INPUT_PATHS[@]}" <<'NODE'
+  # 使用 bun 运行内联脚本 (也可以保留用 node，但 bun 更快且环境统一)
+  ROOT_DIR="$ROOT_DIR" bun "${INPUT_PATHS[@]}" <<'JS'
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -38,15 +39,20 @@ const inputs = process.argv.slice(2);
 const files = [];
 
 async function walk(entryPath) {
-  const st = await fs.stat(entryPath);
-  if (st.isDirectory()) {
-    const entries = await fs.readdir(entryPath);
-    for (const entry of entries) {
-      await walk(path.join(entryPath, entry));
+  try {
+    const st = await fs.stat(entryPath);
+    if (st.isDirectory()) {
+      const entries = await fs.readdir(entryPath);
+      for (const entry of entries) {
+        await walk(path.join(entryPath, entry));
+      }
+      return;
     }
-    return;
+    files.push(entryPath);
+  } catch (e) {
+    // 忽略不存在的文件 (防止刚迁移时某些文件缺失导致 crash)
+    if (e.code !== 'ENOENT') throw e;
   }
-  files.push(entryPath);
 }
 
 for (const input of inputs) {
@@ -64,12 +70,13 @@ for (const filePath of files) {
   const rel = normalize(path.relative(rootDir, filePath));
   hash.update(rel);
   hash.update("\0");
+  // bun.lockb 是二进制文件，直接读取没问题
   hash.update(await fs.readFile(filePath));
   hash.update("\0");
 }
 
 process.stdout.write(hash.digest("hex"));
-NODE
+JS
 }
 
 current_hash="$(compute_hash)"
@@ -81,7 +88,10 @@ if [[ -f "$HASH_FILE" ]]; then
   fi
 fi
 
-pnpm -s exec tsc -p "$A2UI_RENDERER_DIR/tsconfig.json"
-rolldown -c "$A2UI_APP_DIR/rolldown.config.mjs"
+# 使用 bunx 执行 TypeScript 编译
+bunx tsc -p "$A2UI_RENDERER_DIR/tsconfig.json"
+
+# 使用 bunx 执行 Rolldown 打包
+bunx rolldown -c "$A2UI_APP_DIR/rolldown.config.mjs"
 
 echo "$current_hash" > "$HASH_FILE"

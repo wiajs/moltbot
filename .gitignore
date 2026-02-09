@@ -1,44 +1,72 @@
+# Dependencies
 node_modules
 **/node_modules/
-.env
-docker-compose.extra.yml
-dist
-*.bun-build
-pnpm-lock.yaml
-bun.lock
-bun.lockb
-coverage
 .pnpm-store
-.worktrees/
-.DS_Store
-**/.DS_Store
+
+# Lock files (Ignore non-Bun lockfiles to force Bun usage)
+pnpm-lock.yaml
+pnpm-workspace.yaml
+package-lock.json
+yarn.lock
+
+# Bun Lockfile (Do NOT ignore bun.lockb, it should be committed)
+# bun.lockb 
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Docker
+docker-compose.extra.yml
+
+# Build outputs
+dist
+dist/
+*.bun-build
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Test & Coverage
+coverage
 ui/src/ui/__screenshots__/
 ui/playwright-report/
 ui/test-results/
 
-# Bun build artifacts
-*.bun-build
+# System Files
+.worktrees/
+.DS_Store
+**/.DS_Store
+Thumbs.db
+
+# Bun/App Build artifacts
 apps/macos/.build/
 apps/shared/MoltbotKit/.build/
 **/ModuleCache/
 bin/
-bin/clawdbot-mac
-bin/docs-list
 apps/macos/.build-local/
 apps/macos/.swiftpm/
 apps/shared/MoltbotKit/.swiftpm/
 Core/
+
+# iOS / Xcode specific
 apps/ios/*.xcodeproj/
 apps/ios/*.xcworkspace/
 apps/ios/.swiftpm/
-vendor/
+apps/ios/*.xcfilelist
 apps/ios/Clawdbot.xcodeproj/
 apps/ios/Clawdbot.xcodeproj/**
-apps/macos/.build/**
-**/*.bun-build
-apps/ios/*.xcfilelist
+apps/ios/*.ipa
+apps/ios/*.dSYM.zip
+apps/ios/*.mobileprovision
 
-# Vendor build artifacts
+# Vendor / Third-party
+vendor/
 vendor/a2ui/renderers/lit/dist/
 src/canvas-host/a2ui/*.bundle.js
 src/canvas-host/a2ui/*.map
@@ -52,15 +80,6 @@ apps/ios/fastlane/screenshots/
 apps/ios/fastlane/test_output/
 apps/ios/fastlane/logs/
 apps/ios/fastlane/.env
-apps/ios/fastlane/report.xml
-
-# fastlane build artifacts (local)
-apps/ios/*.ipa
-apps/ios/*.dSYM.zip
-
-# provisioning profiles (local)
-apps/ios/*.mobileprovision
-.env
 
 # Local untracked files
 .local/
@@ -68,8 +87,10 @@ IDENTITY.md
 USER.md
 .tgz
 
-# local tooling
+# Local tooling
 .serena/
+.vscode/
+.idea/
 
 # Agent credentials and memory (NEVER COMMIT)
 /memory/

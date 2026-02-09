@@ -1,12 +1,12 @@
 {
-  "name": "@openclaw/imessage",
+  "name": "@moltbot/imessage",
   "version": "2026.2.6-3",
-  "description": "OpenClaw iMessage channel plugin",
+  "description": "Moltbot iMessage channel plugin",
   "type": "module",
   "devDependencies": {
-    "openclaw": "workspace:*"
+    "moltbot": "file:../../"
   },
-  "openclaw": {
+  "moltbot": {
     "extensions": [
       "./index.ts"
     ]
