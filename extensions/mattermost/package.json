@@ -1,6 +1,7 @@
 {
   "name": "@moltbot/mattermost",
-  "version": "2026.2.6-3",
+  "version": "2026.2.9",
+  "private": true,
   "description": "Moltbot Mattermost channel plugin",
   "type": "module",
   "devDependencies": {
