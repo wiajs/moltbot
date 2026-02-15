@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -104,11 +104,11 @@ const logRunner = (message) => {
   if (env.OPENCLAW_RUNNER_LOG === "0") {
     return;
   }
-  process.stderr.write(`[openclaw] ${message}\n`);
+  process.stderr.write(`[moltbot] ${message}\n`);
 };
 
 const runNode = () => {
-  const nodeProcess = spawn(process.execPath, ["openclaw.mjs", ...args], {
+  const nodeProcess = spawn(process.execPath, ["moltbot.js", ...args], {
     cwd,
     env,
     stdio: "inherit",

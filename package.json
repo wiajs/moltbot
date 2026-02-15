@@ -10,7 +10,7 @@
     "url": "https://github.com/wiajs/moltbot.git"
   },
   "bin": {
-    "moltbot": "openclaw.mjs"
+    "moltbot": "moltbot.js"
   },
   "workspaces": [
     ".",
@@ -25,7 +25,7 @@
     "docs/",
     "extensions/",
     "LICENSE",
-    "openclaw.mjs",
+    "moltbot.js",
     "README-header.png",
     "README.md",
     "skills/"
