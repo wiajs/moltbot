@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
+
 import { $ } from "bun";
 
 // 1. 像写 Shell 一样执行命令
-await $`echo "开始构建项目..."`;
+await $`echo "开始合并OpenClaw..."`;
 
 // 2. 变量穿透 (JavaScript 变量直接在 Shell 中使用)
 const branch = "main";
@@ -17,8 +18,8 @@ try {
   // 查找包含 "TODO" 的行，并统计行数
   await $`grep "TODO" ${fileName} | wc -l`;
 } catch (err) {
-  console.log("未找到 TODO 或命令出错");
+  console.log("未找到 TODO 或命令出错", err);
 }
 
 // 5. 跨平台命令 (rm -rf 在 Windows 上也能用 Bun Shell 跑)
-await $`rm -rf ./dist`;
+// await $`rm -rf ./dist`;
