@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { $ } from "bun";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 // 配置常量
@@ -19,68 +19,78 @@ async function runSync() {
     // 使用 -X ours 优先保留本地关于 node/pnpm 到 bun 的全局修改
     await $`git merge upstream/main --no-commit --no-ff -X ours`;
   } catch (err) {
-    console.log("⚠️ 检测到冲突，准备自动处理 extensions 目录...");
+    console.log("⚠️ 检测到冲突，开始自动化清理与修复...", err);
   }
 
-  // 4. 自动处理 extensions 目录中的冲突
+  // --- 自动处理 modify/delete 冲突 (解决你看到的报错) ---
+  const deletedFiles = ["pnpm-lock.yaml", "packages/moltbot", "packages/clawdbot"];
+  for (const file of deletedFiles) {
+    if (existsSync(file)) {
+      console.log(`  🗑️  清理本地已删除但上游修改的文件: ${file}`);
+      await $`git rm -rf ${file}`;
+    }
+  }
+
+  // --- 处理 extensions ---
   if (existsSync(EXTENSIONS_DIR)) {
-    const extensions = await $`ls ${EXTENSIONS_DIR}`.text();
-    const extList = extensions.split("\n").filter(Boolean);
+    const extensions = (await $`ls ${EXTENSIONS_DIR}`.text()).split("\n").filter(Boolean);
 
-    for (const ext of extList) {
+    for (const ext of extensions) {
       const pkgPath = join(EXTENSIONS_DIR, ext, "package.json");
-
       if (existsSync(pkgPath)) {
         await handlePackageJsonConflict(pkgPath);
       }
     }
   }
 
-  console.log("✅ 自动合并与冲突处理完成。");
-  console.log("📝 请手动检查代码并运行: git commit");
+  console.log("✅ 自动化处理完成。");
+  console.log("📝 剩余冲突请手动执行 git add . 和 git commit");
 }
 
 async function handlePackageJsonConflict(filePath) {
-  // 从 git 获取上游和本地的版本内容
-  const localContent = await $`git show HEAD:${filePath}`.text();
-  const upstreamContent = await $`git show upstream/main:${filePath}`.text();
-
   try {
-    const localPkg = JSON.parse(localContent);
+    // 获取上游内容
+    const upstreamContent = await $`git show upstream/main:${filePath}`.text();
     const upstreamPkg = JSON.parse(upstreamContent);
 
-    // 规则 1: 自动更新 version 为 openclaw (upstream) 的版本
+    let localPkg;
+    try {
+      // 尝试获取本地 HEAD 内容
+      const localContent = await $`git show HEAD:${filePath}`.text();
+      localPkg = JSON.parse(localContent);
+    } catch {
+      // 如果 HEAD 里没有（说明是上游新增的插件），直接基于上游内容进行初始化修改
+      localPkg = { ...upstreamPkg };
+    }
+
     const newVersion = upstreamPkg.version;
 
-    // 规则 2: 保留本地的 @moltbot 命名空间和 Moltbot 描述
+    // 应用你的命名规则：保留本地的 @moltbot 命名
     const updatedPkg = {
       ...localPkg,
-      version: newVersion, // 使用上游版本号
-      // 显式保留本地已改名的字段 (以防被覆盖)
-      name: localPkg.name.replace("@openclaw", "@moltbot"),
-      description: localPkg.description?.replace(/Open[Cc]law/g, "Moltbot"),
+      name: (localPkg.name || upstreamPkg.name).replace("@openclaw", "@moltbot"),
+      version: newVersion,
+      description: (localPkg.description || upstreamPkg.description)?.replace(
+        /Open[Cc]law/g,
+        "Moltbot",
+      ),
     };
 
-    // 如果存在 moltbot/openclaw 对象的 key 名冲突，确保使用 moltbot
-    if (localPkg.moltbot && upstreamPkg.openclaw) {
-      updatedPkg.moltbot = { ...localPkg.moltbot };
+    // 转换配置块名称
+    if (upstreamPkg.openclaw) {
+      updatedPkg.moltbot = localPkg.moltbot || upstreamPkg.openclaw;
       delete updatedPkg.openclaw;
     }
 
     writeFileSync(filePath, JSON.stringify(updatedPkg, null, 2));
     await $`git add ${filePath}`;
-    console.log(`  ✔️ 已处理: ${filePath} (同步版本至 ${newVersion})`);
+    console.log(`  ✔️ 已处理: ${filePath} -> ${newVersion}`);
   } catch (e) {
-    console.error(`  ❌ 无法自动处理 ${filePath}, 请手动检查。`);
+    console.error(`  ❌ 处理失败 ${filePath}: ${e.message}`);
   }
 }
 
 runSync().catch(console.error);
-
-// const branch = "main";
-// const fileName = "README.md";
-// const content = await $`git show ${branch}:${fileName}`.text();
-// console.log(`文件前10个字符: ${content.substring(0, 10)}`);
 
 // try {
 //   await $`grep "TODO" ${fileName} | wc -l`;
