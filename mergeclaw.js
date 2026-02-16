@@ -124,7 +124,16 @@ async function handlePackageJsonConflict(filePath) {
       }
     }
 
-    // 5. 转换配置块名称 (openclaw -> moltbot)
+    // peerDependencies: openclaw -> moltbot (>=Version)
+    if (updatedPkg.peerDependencies) {
+      if (updatedPkg.peerDependencies.openclaw) {
+        delete updatedPkg.peerDependencies.openclaw;
+        // 自动设置为 >= 当前同步的版本号
+        updatedPkg.peerDependencies.moltbot = `>=${upstreamPkg.version}`;
+      }
+    }
+
+        // 5. 转换配置块名称 (openclaw -> moltbot)
     if (upstreamPkg.openclaw) {
       updatedPkg.moltbot = localPkg.moltbot || upstreamPkg.openclaw;
       delete updatedPkg.openclaw;

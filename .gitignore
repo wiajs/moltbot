@@ -47,6 +47,8 @@ Thumbs.db
 # Bun/App Build artifacts
 apps/macos/.build/
 apps/shared/MoltbotKit/.build/
+apps/shared/OpenClawKit/.build/
+apps/shared/OpenClawKit/Package.resolved
 **/ModuleCache/
 bin/
 apps/macos/.build-local/
@@ -83,9 +85,11 @@ apps/ios/fastlane/.env
 
 # Local untracked files
 .local/
+docs/.local/
 IDENTITY.md
 USER.md
 .tgz
+.idea
 
 # Local tooling
 .serena/
@@ -96,4 +100,5 @@ USER.md
 /memory/
 .agent/*.json
 !.agent/workflows/
-local/
+/local/
+package-lock.json

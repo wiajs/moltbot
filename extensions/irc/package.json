@@ -1,0 +1,14 @@
+{
+  "name": "@moltbot/irc",
+  "version": "2026.2.15",
+  "description": "Moltbot IRC channel plugin",
+  "type": "module",
+  "devDependencies": {
+    "moltbot": "file:../../"
+  },
+  "moltbot": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 {
   "name": "@moltbot/memory-core",
-  "version": "2026.2.9",
+  "version": "2026.2.15",
   "private": true,
   "description": "Moltbot core memory search plugin",
   "type": "module",
@@ -8,7 +8,7 @@
     "moltbot": "file:../../"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.1.26"
+    "moltbot": ">=2026.2.15"
   },
   "moltbot": {
     "extensions": [
