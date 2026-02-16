@@ -57,7 +57,7 @@ async function runSync() {
   }
 
   // --- 自动化冲突修复 ---
-  console.log(`\n${BOLD}${BLUE}🛠️  启动自动化清理与品牌同步...${RESET}`);
+  console.log(`\n${BOLD}${BLUE}🛠️  启动自动化清理、品牌同步与依赖修正...${RESET}`);
 
   // 1. 清理本地已决定删除的文件/目录
   const deletedFiles = ["pnpm-lock.yaml", "packages/moltbot", "packages/clawdbot"];
@@ -102,25 +102,40 @@ async function handlePackageJsonConflict(filePath) {
       localPkg = { ...upstreamPkg };
     }
 
+    // --- 核心逻辑：更新 package.json 内容 ---
     const updatedPkg = {
       ...localPkg,
+      // 1. 更新名称命名空间
       name: (localPkg.name || upstreamPkg.name).replace("@openclaw", "@moltbot"),
+      // 2. 同步上游版本
       version: upstreamPkg.version,
+      // 3. 更新描述
       description: (localPkg.description || upstreamPkg.description)?.replace(
         /Open[Cc]law/g,
         "Moltbot",
       ),
     };
 
-    // 转换配置块
+    // 4. 修正依赖：将 devDependencies 中的 openclaw 替换为 moltbot 并指向物理路径
+    if (updatedPkg.devDependencies) {
+      if (updatedPkg.devDependencies.openclaw) {
+        delete updatedPkg.devDependencies.openclaw;
+        updatedPkg.devDependencies.moltbot = "file:../../";
+      }
+    }
+
+    // 5. 转换配置块名称 (openclaw -> moltbot)
     if (upstreamPkg.openclaw) {
       updatedPkg.moltbot = localPkg.moltbot || upstreamPkg.openclaw;
       delete updatedPkg.openclaw;
     }
 
+    // 写入文件并暂存
     writeFileSync(filePath, JSON.stringify(updatedPkg, null, 2));
     await $`git add ${filePath}`;
-    console.log(`  ${GREEN}✔${RESET} 已同步: ${filePath} -> ${BLUE}${upstreamPkg.version}${RESET}`);
+    console.log(
+      `  ${GREEN}✔${RESET} 已同步并修正依赖: ${filePath} -> ${BLUE}${upstreamPkg.version}${RESET}`,
+    );
   } catch (e) {
     console.error(`  ${RED}✘ 处理失败 ${filePath}: ${e.message}${RESET}`);
   }
