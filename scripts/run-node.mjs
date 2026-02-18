@@ -1,14 +1,14 @@
 #!/usr/bin/env bun
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
 const compiler = "tsdown";
-const compilerArgs = ["exec", compiler, "--no-clean"];
+const compilerArgs = ["x", compiler, "--no-clean"];
 
-const gitWatchedPaths = ["src", "tsconfig.json", "package.json"];
+export const runNodeWatchedPaths = ["src", "tsconfig.json", "package.json"];
 
 const statMtime = (filePath, fsImpl = fs) => {
   try {
@@ -91,7 +91,7 @@ const resolveGitHead = (deps) => {
 
 const hasDirtySourceTree = (deps) => {
   const output = runGit(
-    ["status", "--porcelain", "--untracked-files=normal", "--", ...gitWatchedPaths],
+    ["status", "--porcelain", "--untracked-files=normal", "--", ...runNodeWatchedPaths],
     deps,
   );
   if (output === null) {
@@ -173,13 +173,13 @@ const logRunner = (message, deps) => {
   if (deps.env.OPENCLAW_RUNNER_LOG === "0") {
     return;
   }
-  process.stderr.write(`[moltbot] ${message}\n`);
+  deps.stderr.write(`[openclaw] ${message}\n`);
 };
 
-const runNode = () => {
-  const nodeProcess = spawn(process.execPath, ["moltbot.js", ...args], {
-    cwd,
-    env,
+const runOpenClaw = async (deps) => {
+  const nodeProcess = deps.spawn(deps.execPath, ["moltbot.js", ...deps.args], {
+    cwd: deps.cwd,
+    env: deps.env,
     stdio: "inherit",
   });
   const res = await new Promise((resolve) => {
@@ -231,9 +231,10 @@ export async function runNodeMain(params = {}) {
   }
 
   logRunner("Building TypeScript (dist is stale).", deps);
-  const buildCmd = deps.platform === "win32" ? "cmd.exe" : "pnpm";
+  // 适配 Bun 环境下的构建命令
+  const buildCmd = deps.platform === "win32" ? "cmd.exe" : "bun";
   const buildArgs =
-    deps.platform === "win32" ? ["/d", "/s", "/c", "pnpm", ...compilerArgs] : compilerArgs;
+    deps.platform === "win32" ? ["/d", "/s", "/c", "bun", ...compilerArgs] : compilerArgs;
   const build = deps.spawn(buildCmd, buildArgs, {
     cwd: deps.cwd,
     env: deps.env,
