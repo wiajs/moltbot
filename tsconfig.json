@@ -13,7 +13,7 @@
     "noEmitOnError": true,
     "outDir": "dist",
     "resolveJsonModule": true,
-    "skipLibCheck": true,
+    "skip LibCheck": true,
     "strict": true,
     "target": "es2023",
     "useDefineForClassFields": false,

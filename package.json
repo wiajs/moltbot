@@ -3,9 +3,9 @@
   "version": "2026.2.6-3",
   "description": "Multi-channel AI gateway with extensible messaging integrations",
   "keywords": [],
-  "homepage": "https://github.com/openclaw/openclaw#readme",
+  "homepage": "https://github.com/wiajs/moltbot#readme",
   "bugs": {
-    "url": "https://github.com/openclaw/openclaw/issues"
+    "url": "https://github.com/wiajs/moltbot/issues"
   },
   "license": "MIT",
   "author": "",
