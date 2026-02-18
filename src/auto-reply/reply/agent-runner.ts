@@ -19,6 +19,7 @@ import {
   updateSessionStoreEntry,
 } from "../../config/sessions.js";
 import { emitDiagnosticEvent, isDiagnosticsEnabled } from "../../infra/diagnostic-events.js";
+import { enqueueSystemEvent } from "../../infra/system-events.js";
 import { defaultRuntime } from "../../runtime.js";
 import { estimateUsageCost, resolveModelCostConfig } from "../../utils/usage-format.js";
 import { resolveResponseUsageMode, type VerboseLevel } from "../thinking.js";
@@ -36,6 +37,13 @@ import { appendUsageLine, formatResponseUsageLine } from "./agent-runner-utils.j
 import { createAudioAsVoiceBuffer, createBlockReplyPipeline } from "./block-reply-pipeline.js";
 import { resolveBlockStreamingCoalescing } from "./block-streaming.js";
 import { createFollowupRunner } from "./followup-runner.js";
+import {
+  auditPostCompactionReads,
+  extractReadPaths,
+  formatAuditWarning,
+  readSessionMessages,
+} from "./post-compaction-audit.js";
+import { readPostCompactionContext } from "./post-compaction-context.js";
 import { enqueueFollowupRun, type FollowupRun, type QueueSettings } from "./queue.js";
 import { createReplyToModeFilterForChannel, resolveReplyToMode } from "./reply-threading.js";
 import { incrementRunCompactionCount, persistRunSessionUsage } from "./session-run-accounting.js";
@@ -77,6 +85,9 @@ function appendUnscheduledReminderNote(payloads: ReplyPayload[]): ReplyPayload[]
     };
   });
 }
+
+// Track sessions pending post-compaction read audit (Layer 3)
+const pendingPostCompactionAudits = new Map<string, boolean>();
 
 export async function runReplyAgent(params: {
   commandBody: string;
@@ -398,13 +409,13 @@ export async function runReplyAgent(params: {
       await Promise.allSettled(pendingToolTasks);
     }
 
-    const usage = runResult.meta.agentMeta?.usage;
-    const promptTokens = runResult.meta.agentMeta?.promptTokens;
-    const modelUsed = runResult.meta.agentMeta?.model ?? fallbackModel ?? defaultModel;
+    const usage = runResult.meta?.agentMeta?.usage;
+    const promptTokens = runResult.meta?.agentMeta?.promptTokens;
+    const modelUsed = runResult.meta?.agentMeta?.model ?? fallbackModel ?? defaultModel;
     const providerUsed =
-      runResult.meta.agentMeta?.provider ?? fallbackProvider ?? followupRun.run.provider;
+      runResult.meta?.agentMeta?.provider ?? fallbackProvider ?? followupRun.run.provider;
     const cliSessionId = isCliProvider(providerUsed, cfg)
-      ? runResult.meta.agentMeta?.sessionId?.trim()
+      ? runResult.meta?.agentMeta?.sessionId?.trim()
       : undefined;
     const contextTokensUsed =
       agentCfgContextTokens ??
@@ -416,12 +427,12 @@ export async function runReplyAgent(params: {
       storePath,
       sessionKey,
       usage,
-      lastCallUsage: runResult.meta.agentMeta?.lastCallUsage,
+      lastCallUsage: runResult.meta?.agentMeta?.lastCallUsage,
       promptTokens,
       modelUsed,
       providerUsed,
       contextTokensUsed,
-      systemPromptReport: runResult.meta.systemPromptReport,
+      systemPromptReport: runResult.meta?.systemPromptReport,
       cliSessionId,
     });
 
@@ -444,6 +455,7 @@ export async function runReplyAgent(params: {
       currentMessageId: sessionCtx.MessageSidFull ?? sessionCtx.MessageSid,
       messageProvider: followupRun.run.messageProvider,
       messagingToolSentTexts: runResult.messagingToolSentTexts,
+      messagingToolSentMediaUrls: runResult.messagingToolSentMediaUrls,
       messagingToolSentTargets: runResult.messagingToolSentTargets,
       originatingTo: sessionCtx.OriginatingTo ?? sessionCtx.To,
       accountId: sessionCtx.AccountId,
@@ -497,7 +509,7 @@ export async function runReplyAgent(params: {
           promptTokens,
           total: totalTokens,
         },
-        lastCallUsage: runResult.meta.agentMeta?.lastCallUsage,
+        lastCallUsage: runResult.meta?.agentMeta?.lastCallUsage,
         context: {
           limit: contextTokensUsed,
           used: totalTokens,
@@ -543,9 +555,27 @@ export async function runReplyAgent(params: {
         sessionStore: activeSessionStore,
         sessionKey,
         storePath,
-        lastCallUsage: runResult.meta.agentMeta?.lastCallUsage,
+        lastCallUsage: runResult.meta?.agentMeta?.lastCallUsage,
         contextTokensUsed,
       });
+
+      // Inject post-compaction workspace context for the next agent turn
+      if (sessionKey) {
+        const workspaceDir = process.cwd();
+        readPostCompactionContext(workspaceDir)
+          .then((contextContent) => {
+            if (contextContent) {
+              enqueueSystemEvent(contextContent, { sessionKey });
+            }
+          })
+          .catch(() => {
+            // Silent failure — post-compaction context is best-effort
+          });
+
+        // Set pending audit flag for Layer 3 (post-compaction read audit)
+        pendingPostCompactionAudits.set(sessionKey, true);
+      }
+
       if (verboseEnabled) {
         const suffix = typeof count === "number" ? ` (count ${count})` : "";
         finalPayloads = [{ text: `🧹 Auto-compaction complete${suffix}.` }, ...finalPayloads];
@@ -556,6 +586,25 @@ export async function runReplyAgent(params: {
     }
     if (responseUsageLine) {
       finalPayloads = appendUsageLine(finalPayloads, responseUsageLine);
+    }
+
+    // Post-compaction read audit (Layer 3)
+    if (sessionKey && pendingPostCompactionAudits.get(sessionKey)) {
+      pendingPostCompactionAudits.delete(sessionKey); // Delete FIRST — one-shot only
+      try {
+        const sessionFile = activeSessionEntry?.sessionFile;
+        if (sessionFile) {
+          const messages = readSessionMessages(sessionFile);
+          const readPaths = extractReadPaths(messages);
+          const workspaceDir = process.cwd();
+          const audit = auditPostCompactionReads(readPaths, workspaceDir);
+          if (!audit.passed) {
+            enqueueSystemEvent(formatAuditWarning(audit.missingPatterns), { sessionKey });
+          }
+        }
+      } catch {
+        // Silent failure — audit is best-effort
+      }
     }
 
     return finalizeWithFollowup(

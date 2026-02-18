@@ -2,13 +2,14 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "declaration": true,
-    "declarationMap": false,
+    "declarationMap": false, // close sourcemap
     "emitDeclarationOnly": true,
     "noEmit": false,
     "noEmitOnError": true,
     "outDir": "dist/plugin-sdk",
     "rootDir": "src",
-    "tsBuildInfoFile": "dist/plugin-sdk/.tsbuildinfo"
+    "tsBuildInfoFile": "dist/plugin-sdk/.tsbuildinfo",
+    "incremental": true // 启用增量构建 (第二次构建时会飞快)
   },
   "include": ["src/plugin-sdk/index.ts", "src/plugin-sdk/account-id.ts", "src/types/**/*.d.ts"],
   "exclude": ["node_modules", "dist", "src/**/*.test.ts"]

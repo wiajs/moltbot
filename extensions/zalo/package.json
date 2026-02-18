@@ -1,6 +1,6 @@
 {
   "name": "@moltbot/zalo",
-  "version": "2026.2.16",
+  "version": "2026.2.17",
   "description": "Moltbot Zalo channel plugin",
   "type": "module",
   "dependencies": {

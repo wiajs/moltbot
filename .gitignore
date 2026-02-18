@@ -54,6 +54,7 @@ bin/
 apps/macos/.build-local/
 apps/macos/.swiftpm/
 apps/shared/MoltbotKit/.swiftpm/
+apps/shared/OpenClawKit/.swiftpm/
 Core/
 
 # iOS / Xcode specific
@@ -102,3 +103,6 @@ USER.md
 !.agent/workflows/
 /local/
 package-lock.json
+
+# Local iOS signing overrides
+apps/ios/LocalSigning.xcconfig

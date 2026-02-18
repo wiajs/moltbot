@@ -296,6 +296,7 @@ export function buildSubagentSystemPrompt(params: {
     "3. **Don't initiate** - No heartbeats, no proactive actions, no side quests",
     "4. **Be ephemeral** - You may be terminated after task completion. That's fine.",
     "5. **Trust push-based completion** - Descendant results are auto-announced back to you; do not busy-poll for status.",
+    "6. **Recover from compacted/truncated tool output** - If you see `[compacted: tool output removed to free context]` or `[truncated: output exceeded context limit]`, assume prior output was reduced. Re-read only what you need using smaller chunks (`read` with offset/limit, or targeted `rg`/`head`/`tail`) instead of full-file `cat`.",
     "",
     "## Output Format",
     "When complete, your final response should include:",
@@ -508,23 +509,39 @@ export async function runSubagentAnnounceFlow(params: {
     let requesterIsSubagent = requesterDepth >= 1;
     // If the requester subagent has already finished, bubble the announce to its
     // requester (typically main) so descendant completion is not silently lost.
+    // BUT: only fallback if the parent SESSION is deleted, not just if the current
+    // run ended. A parent waiting for child results has no active run but should
+    // still receive the announce — injecting will start a new agent turn.
     if (requesterIsSubagent) {
       const { isSubagentSessionRunActive, resolveRequesterForChildSession } =
         await import("./subagent-registry.js");
       if (!isSubagentSessionRunActive(targetRequesterSessionKey)) {
-        const fallback = resolveRequesterForChildSession(targetRequesterSessionKey);
-        if (!fallback?.requesterSessionKey) {
-          // Without a requester fallback we cannot safely deliver this nested
-          // completion. Keep cleanup retryable so a later registry restore can
-          // recover and re-announce instead of silently dropping the result.
-          shouldDeleteChildSession = false;
-          return false;
+        // Parent run has ended. Check if parent SESSION still exists.
+        // If it does, the parent may be waiting for child results — inject there.
+        const parentSessionEntry = loadSessionEntryByKey(targetRequesterSessionKey);
+        const parentSessionAlive =
+          parentSessionEntry &&
+          typeof parentSessionEntry.sessionId === "string" &&
+          parentSessionEntry.sessionId.trim();
+
+        if (!parentSessionAlive) {
+          // Parent session is truly gone — fallback to grandparent
+          const fallback = resolveRequesterForChildSession(targetRequesterSessionKey);
+          if (!fallback?.requesterSessionKey) {
+            // Without a requester fallback we cannot safely deliver this nested
+            // completion. Keep cleanup retryable so a later registry restore can
+            // recover and re-announce instead of silently dropping the result.
+            shouldDeleteChildSession = false;
+            return false;
+          }
+          targetRequesterSessionKey = fallback.requesterSessionKey;
+          targetRequesterOrigin =
+            normalizeDeliveryContext(fallback.requesterOrigin) ?? targetRequesterOrigin;
+          requesterDepth = getSubagentDepthFromSessionStore(targetRequesterSessionKey);
+          requesterIsSubagent = requesterDepth >= 1;
         }
-        targetRequesterSessionKey = fallback.requesterSessionKey;
-        targetRequesterOrigin =
-          normalizeDeliveryContext(fallback.requesterOrigin) ?? targetRequesterOrigin;
-        requesterDepth = getSubagentDepthFromSessionStore(targetRequesterSessionKey);
-        requesterIsSubagent = requesterDepth >= 1;
+        // If parent session is alive (just has no active run), continue with parent
+        // as target. Injecting the announce will start a new agent turn for processing.
       }
     }
 
