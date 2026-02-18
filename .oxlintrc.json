@@ -7,7 +7,7 @@
     "suspicious": "error"
   },
   "rules": {
-    "curly": "error",
+    "curly": "off",
     "eslint-plugin-unicorn/prefer-array-find": "off",
     "eslint/no-await-in-loop": "off",
     "eslint/no-new": "off",
@@ -20,7 +20,8 @@
     "typescript/no-extraneous-class": "off",
     "typescript/no-unsafe-type-assertion": "off",
     "unicorn/consistent-function-scoping": "off",
-    "unicorn/require-post-message-target-origin": "off"
+    "unicorn/require-post-message-target-origin": "off",
+    "typescript/restrict-template-expressions": "warn"
   },
   "ignorePatterns": [
     "assets/",

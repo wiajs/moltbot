@@ -119,67 +119,77 @@ async function runSync() {
  * 使用 git merge-tree 模拟合并并提取冲突内容
  */
 async function generateConflictReport(version) {
-  const logDir = join(process.cwd(), "log");
-  if (!existsSync(logDir)) {
-    mkdirSync(logDir, { recursive: true });
-  }
-  const logFilePath = join(logDir, `merge-${version}.md`);
-
-  // 1. 获取冲突文件列表 (通过 merge-tree 的标准输出解析)
-  // 我们使用 git merge-tree --write-tree 来获取更详细的冲突列表
-  const mergeTreeOutput = await $`git merge-tree HEAD upstream/main`.text();
-
-  // 匹配所有 "changed in both" 或存在冲突标识的文件
-  const conflictFileRegex = /^\s+our\s+\d+\s+[a-f0-9]+\s+(.*)$/gm;
-  const conflictFiles = new Set();
-  let match;
-  while ((match = conflictFileRegex.exec(mergeTreeOutput)) !== null) {
-    conflictFiles.add(match[1].trim());
-  }
-
-  if (conflictFiles.size === 0) {
-    writeFileSync(logFilePath, `# Merge Report - ${version}\n\n✅ 本次合并无代码冲突。`);
-    return;
-  }
-  let mdContent = `# ⚠️ 冲突报告 (已被 -X ours 自动覆盖) - ${version}\n\n`;
-  mdContent += `> 自动同步时间: ${new Date().toLocaleString()}\n`;
-  mdContent += `> **注意**：以下冲突已在合并时自动选择了本地代码，上游的对应修改已被丢弃。\n\n`;
-
-  // 2. 为了获取带标记的冲突内容，我们临时进行一次标准合并并读取
-  // 这样做比解析复杂的 merge-tree 原始输出更准确
   try {
-    await $`git merge upstream/main --no-commit --no-ff`.quiet().nothrow();
+    const logDir = join(process.cwd(), "log");
+    if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });
 
-    for (const file of conflictFiles) {
-      // 强制转换为 string 避免 lint 报错
-      const fileName = String(file);
-      if (!existsSync(fileName)) {
-        continue;
-      }
+    const logFilePath = join(logDir, `merge-${version}.md`);
 
-      const content = readFileSync(fileName, "utf8");
-      const conflictBlocks = content.match(/^<<<<<<<[\s\S]*?^>>>>>>>/gm);
+    let conflictFiles = [];
 
-      if (conflictBlocks) {
-        const lang = extname(fileName).slice(1) || "text";
-        mdContent += `### 📄 文件: \`${fileName}\`\n\n`;
-        conflictBlocks.forEach((block, i) => {
-          mdContent += `#### 冲突块 #${i + 1}\n\`\`\`${lang}\n${block}\n\`\`\`\n\n`;
-        });
-        mdContent += `---\n\n`;
-      }
+    console.log(`${YELLOW}🔍 正在探测潜在冲突...${RESET}`);
+
+    // --- 1. 模拟合并以获取冲突列表 ---
+    try {
+      // 使用 --no-commit --no-ff 执行一次标准合并（不带 -X ours）
+      // .nothrow() 确保即使失败（有冲突）脚本也继续运行
+      await $`git merge upstream/main --no-commit --no-ff`.quiet().nothrow();
+
+      // 获取处于冲突状态 (Unmerged) 的文件列表
+      const diffOutput = await $`git diff --name-only --diff-filter=U`.text();
+      conflictFiles = diffOutput.split("\n").filter(Boolean);
+    } catch (e) {
+      console.error(`${RED}❌ 探测冲突时出错: ${e.message}${RESET}`);
     }
-  } catch (e) {
-    mdContent += `*无法读取文件内容: ${e.message}*\n\n`;
-  } finally {
-    // 无论如何都要中止这个临时合并，为后面的 -X ours 让路
-    await $`git merge --abort`.quiet().nothrow();
-  }
 
-  writeFileSync(logFilePath, mdContent);
-  console.log(
-    `${GREEN}✔ 报告已生成: ${logFilePath} (共计 ${conflictFiles.size} 个文件存在冲突)${RESET}`,
-  );
+    try {
+      if (conflictFiles.length === 0) {
+        writeFileSync(logFilePath, `# Merge Report - ${version}\n\n✅ 本次合并无代码冲突。`);
+        return;
+      }
+
+      // --- 2. 提取冲突内容并写入 Markdown ---
+      let mdContent = `# ⚠️ 冲突报告 (已被 -X ours 自动覆盖) - ${version}\n\n`;
+      mdContent += `> 自动同步时间: ${new Date().toLocaleString()}\n`;
+      mdContent += `> **注意**：以下内容在实际合并中已按本地优先处理。如需上游的某项修改，请根据此报告手动恢复。\n\n`;
+
+      for (const file of conflictFiles) {
+        const fileName = String(file); // 修复 Lint 报错：确保是 string 类型
+        if (!existsSync(fileName)) continue;
+
+        mdContent += `### 📄 文件: \`${fileName}\`\n\n`;
+
+        try {
+          const content = readFileSync(fileName, "utf8");
+          // 提取冲突标记块
+          const conflictBlocks = content.match(/^<<<<<<<[\s\S]*?^>>>>>>>/gm);
+
+          if (conflictBlocks) {
+            const ext = extname(fileName).slice(1) || "text";
+            const lang =
+              ext === "ts" || ext === "tsx" ? "typescript" : ext === "js" ? "javascript" : ext;
+
+            conflictBlocks.forEach((block, i) => {
+              mdContent += `#### 冲突块 #${i + 1}\n\`\`\`${lang}\n${block}\n\`\`\`\n\n`;
+            });
+          }
+        } catch (e) {
+          mdContent += `*无法读取冲突详情: ${e.message}*\n\n`;
+        }
+        mdContent += `\n---\n\n`;
+      }
+    } finally {
+      // --- 3. 清理现场，准备执行真正的 -X ours 合并 ---
+      await $`git merge --abort`.quiet().nothrow();
+    }
+
+    writeFileSync(logFilePath, mdContent);
+    console.log(
+      `${GREEN}✔ 已检测到 ${conflictFiles.length} 个冲突文件，报告已生成: ${logFilePath}${RESET}`,
+    );
+  } catch (e) {
+    console.error(`  ${RED}✘ 冲突报告失败 ${version}: ${e.message}${RESET}`);
+  }
 }
 
 async function handlePackageJsonConflict(filePath) {
