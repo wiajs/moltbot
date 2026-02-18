@@ -1,6 +1,6 @@
 {
   "name": "@moltbot/tlon",
-  "version": "2026.2.17",
+  "version": "2026.2.18",
   "private": true,
   "description": "Moltbot Tlon/Urbit channel plugin",
   "type": "module",

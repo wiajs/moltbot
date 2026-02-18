@@ -38,16 +38,6 @@ function normalizeDiscordSlug(value?: string | null) {
   return text;
 }
 
-function normalizeSlackSlug(raw?: string | null) {
-  const trimmed = raw?.trim().toLowerCase() ?? "";
-  if (!trimmed) {
-    return "";
-  }
-  const dashed = trimmed.replace(/\s+/g, "-");
-  const cleaned = dashed.replace(/[^a-z0-9#@._+-]+/g, "-");
-  return cleaned.replace(/-{2,}/g, "-").replace(/^[-.]+|[-.]+$/g, "");
-}
-
 function parseTelegramGroupId(value?: string | null) {
   const raw = value?.trim() ?? "";
   if (!raw) {
@@ -231,7 +221,7 @@ export function resolveSlackGroupRequireMention(params: GroupMentionParams): boo
   const channelId = params.groupId?.trim();
   const groupChannel = params.groupChannel;
   const channelName = groupChannel?.replace(/^#/, "");
-  const normalizedName = normalizeSlackSlug(channelName);
+  const normalizedName = normalizeHyphenSlug(channelName);
   const candidates = [
     channelId ?? "",
     channelName ? `#${channelName}` : "",
@@ -363,7 +353,7 @@ export function resolveSlackGroupToolPolicy(
   const channelId = params.groupId?.trim();
   const groupChannel = params.groupChannel;
   const channelName = groupChannel?.replace(/^#/, "");
-  const normalizedName = normalizeSlackSlug(channelName);
+  const normalizedName = normalizeHyphenSlug(channelName);
   const candidates = [
     channelId ?? "",
     channelName ? `#${channelName}` : "",

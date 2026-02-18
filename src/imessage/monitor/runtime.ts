@@ -6,5 +6,5 @@ export function resolveRuntime(opts: MonitorIMessageOpts): RuntimeEnv {
 }
 
 export function normalizeAllowList(list?: Array<string | number>) {
-  return (list ?? []).map((entry) => String(entry).trim()).filter(Boolean);
+  return normalizeStringEntries(list);
 }

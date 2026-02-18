@@ -1,6 +1,6 @@
 {
   "name": "@moltbot/matrix",
-  "version": "2026.2.17",
+  "version": "2026.2.18",
   "description": "Moltbot Matrix channel plugin",
   "type": "module",
   "dependencies": {

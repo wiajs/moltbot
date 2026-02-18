@@ -67,6 +67,7 @@ export function isSafeBinUsage(params: {
   safeBins: Set<string>;
   cwd?: string;
   fileExists?: (filePath: string) => boolean;
+  trustedSafeBinDirs?: ReadonlySet<string>;
 }): boolean {
   // Windows host exec uses PowerShell, which has different parsing/expansion rules.
   // Keep safeBins conservative there (require explicit allowlist entries).
@@ -88,6 +89,14 @@ export function isSafeBinUsage(params: {
     return false;
   }
   if (!resolution?.resolvedPath) {
+    return false;
+  }
+  if (
+    !isTrustedSafeBinPath({
+      resolvedPath: resolution.resolvedPath,
+      trustedDirs: params.trustedSafeBinDirs,
+    })
+  ) {
     return false;
   }
   const cwd = params.cwd ?? process.cwd();

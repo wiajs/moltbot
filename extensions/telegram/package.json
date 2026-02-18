@@ -1,6 +1,6 @@
 {
   "name": "@moltbot/telegram",
-  "version": "2026.2.17",
+  "version": "2026.2.18",
   "private": true,
   "description": "Moltbot Telegram channel plugin",
   "type": "module",
