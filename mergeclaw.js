@@ -4,6 +4,15 @@ import { $ } from "bun";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, extname } from "node:path";
 
+/**
+ * MoltBot 同步工具 - mergeclaw.js
+ * 功能：
+ * 1. 自动获取上游 (OpenClaw) 最新版本。
+ * 2. 模拟合并以检测冲突并生成 Markdown 报告。
+ * 3. 使用 -X ours 策略自动完成合并，避免手动处理冲突。
+ * 4. 自动修正品牌命名空间与依赖路径。
+ */
+
 // --- 颜色配置 ---
 const RED = "\x1b[31m";
 const GREEN = "\x1b[32m";
@@ -18,6 +27,7 @@ const EXTENSIONS_DIR = "extensions";
 async function runSync() {
   console.log(`\n${BOLD}${BLUE}🚀 开始同步流程 (自动化合并 + 冲突报告)...${RESET}\n`);
 
+  // 确保 remote 存在
   try {
     await $`git remote add upstream ${UPSTREAM_URL}`.quiet();
   } catch {}
@@ -37,7 +47,7 @@ async function runSync() {
   }
 
   // --- 2. 使用 git merge-tree 预检测冲突并生成报告 ---
-  console.log(`${YELLOW}🔍 使用 merge-tree 生成冲突报告...${RESET}`);
+  console.log(`${YELLOW}🔍 生成冲突报告...${RESET}`);
   await generateConflictReport(upstreamVersion);
 
   // --- 3. 执行真正的合并 (-X ours) ---
@@ -110,19 +120,19 @@ async function runSync() {
   console.log(`   2. 手动确认冲突件`);
   console.log(`   3. 运行 ${BOLD}git add .${RESET}`);
   console.log(
-    `   4. 运行 ${BOLD}git commit -m "chore: sync upstream to version ${upstreamVersion}"${RESET}\n`,
+    `   4. 运行 ${BOLD}git commit -m "chore: sync upstream to version ${upstreamVersion}"${RESET}`,
   );
   console.log(`   5. 上传代码 ${BOLD}git push${RESET}`);
 }
 
 /**
- * 使用 git merge-tree 模拟合并并提取冲突内容
+ * 生成冲突报告
+ * 采用“模拟合并-提取-撤销”策略，兼容不同 Git 版本
  */
 async function generateConflictReport(version) {
   try {
     const logDir = join(process.cwd(), "log");
     if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });
-
     const logFilePath = join(logDir, `merge-${version}.md`);
 
     let conflictFiles = [];
@@ -137,15 +147,11 @@ async function generateConflictReport(version) {
 
       // 获取处于冲突状态 (Unmerged) 的文件列表
       const diffOutput = await $`git diff --name-only --diff-filter=U`.text();
-      conflictFiles = diffOutput.split("\n").filter(Boolean);
-    } catch (e) {
-      console.error(`${RED}❌ 探测冲突时出错: ${e.message}${RESET}`);
-    }
+      conflictFiles = diffOutput.split("\n").filter((f) => f.length > 0);
 
-    try {
       if (conflictFiles.length === 0) {
         writeFileSync(logFilePath, `# Merge Report - ${version}\n\n✅ 本次合并无代码冲突。`);
-        return;
+        return; // 触发 finally
       }
 
       // --- 2. 提取冲突内容并写入 Markdown ---
@@ -178,15 +184,15 @@ async function generateConflictReport(version) {
         }
         mdContent += `\n---\n\n`;
       }
+
+      writeFileSync(logFilePath, mdContent);
+      console.log(
+        `${GREEN}✔ 已检测到 ${conflictFiles.length} 个冲突文件，报告已生成: ${logFilePath}${RESET}`,
+      );
     } finally {
       // --- 3. 清理现场，准备执行真正的 -X ours 合并 ---
       await $`git merge --abort`.quiet().nothrow();
     }
-
-    writeFileSync(logFilePath, mdContent);
-    console.log(
-      `${GREEN}✔ 已检测到 ${conflictFiles.length} 个冲突文件，报告已生成: ${logFilePath}${RESET}`,
-    );
   } catch (e) {
     console.error(`  ${RED}✘ 冲突报告失败 ${version}: ${e.message}${RESET}`);
   }
@@ -258,12 +264,7 @@ async function handlePackageJsonConflict(filePath) {
   }
 }
 
-runSync().catch(console.error);
-
-// try {
-//   await $`grep "TODO" ${fileName} | wc -l`;
-// } catch (err) {
-//   console.log("未找到 TODO 或命令出错", err);
-// }
-
-// await $`rm -rf ./dist`;
+// 执行主程序
+runSync().catch((err) => {
+  console.error(`\n${RED}💥 程序异常终止:${RESET}`, err);
+});
