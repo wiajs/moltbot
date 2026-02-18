@@ -48,7 +48,7 @@ async function runSync() {
 
   // --- 2. 使用 git merge-tree 预检测冲突并生成报告 ---
   console.log(`${YELLOW}🔍 生成冲突报告...${RESET}`);
-  await generateConflictReport(upstreamVersion);
+  const finalLogPath = await generateConflictReport(upstreamVersion);
 
   // --- 3. 执行真正的合并 (-X ours) ---
   console.log(`\n${BOLD}🔀 正在执行合并 (-X ours 策略)...${RESET}`);
@@ -116,13 +116,15 @@ async function runSync() {
 
   console.log(`\n${BOLD}${GREEN}✅ 同步与自动化修复已完成！${RESET}`);
   console.log(`${YELLOW}📝 剩余操作：${RESET}`);
-  console.log(`   1. 查看冲突报告: ${BOLD}log/merge-${upstreamVersion}md${RESET}`);
-  console.log(`   2. 手动确认冲突件`);
-  console.log(`   3. 运行 ${BOLD}git add .${RESET}`);
+  console.log(`   1. 查看冲突报告: ${BOLD}${finalLogPath}${RESET}`);
   console.log(
-    `   4. 运行 ${BOLD}git commit -m "chore: sync upstream to version ${upstreamVersion}"${RESET}`,
+    `   2. 确认无误后运行: ${BOLD}git commit -m "chore: sync to version ${upstreamVersion}"${RESET}`,
   );
-  console.log(`   5. 上传代码 ${BOLD}git push${RESET}`);
+  console.log(`   3. 上传代码 ${BOLD}git push${RESET}`);
+  // 自动在编辑器中打开报告
+  if (finalLogPath && existsSync(finalLogPath)) {
+    await $`code ${finalLogPath}`.quiet().nothrow();
+  }
 }
 
 /**
@@ -130,14 +132,27 @@ async function runSync() {
  * 采用“模拟合并-提取-撤销”策略，兼容不同 Git 版本
  */
 async function generateConflictReport(version) {
+  let R;
   try {
-    const logDir = join(process.cwd(), "log");
-    if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });
-    const logFilePath = join(logDir, `merge-${version}.md`);
+    const syncDir = join(process.cwd(), "sync");
+    if (!existsSync(syncDir)) mkdirSync(syncDir, { recursive: true });
+
+    // --- 自动计算文件名 (如 2026.2.18-2.md) ---
+    let logFileName = `${version}.md`;
+    let logFilePath = join(syncDir, logFileName);
+    let counter = 1;
+
+    while (existsSync(logFilePath)) {
+      counter++;
+      logFileName = `${version}-${counter}.md`;
+      logFilePath = join(syncDir, logFileName);
+    }
+
+    R = logFilePath;
 
     let conflictFiles = [];
 
-    console.log(`${YELLOW}🔍 正在探测潜在冲突...${RESET}`);
+    console.log(`${YELLOW}🔍 正在检测冲突...${RESET}`);
 
     // --- 1. 模拟合并以获取冲突列表 ---
     try {
@@ -149,46 +164,44 @@ async function generateConflictReport(version) {
       const diffOutput = await $`git diff --name-only --diff-filter=U`.text();
       conflictFiles = diffOutput.split("\n").filter((f) => f.length > 0);
 
-      if (conflictFiles.length === 0) {
+      if (conflictFiles.length === 0)
         writeFileSync(logFilePath, `# Merge Report - ${version}\n\n✅ 本次合并无代码冲突。`);
-        return; // 触发 finally
-      }
+      else {
+        // --- 2. 提取冲突内容并写入 Markdown ---
+        let mdContent = `# ⚠️ 冲突报告 (已被 -X ours 自动覆盖) - ${version}\n\n`;
+        mdContent += `> 自动同步时间: ${new Date().toLocaleString()}\n`;
+        mdContent += `> **注意**：以下内容在合并中已按本地优先处理。若需上游逻辑，请手动参考下方代码块。\n\n`;
 
-      // --- 2. 提取冲突内容并写入 Markdown ---
-      let mdContent = `# ⚠️ 冲突报告 (已被 -X ours 自动覆盖) - ${version}\n\n`;
-      mdContent += `> 自动同步时间: ${new Date().toLocaleString()}\n`;
-      mdContent += `> **注意**：以下内容在实际合并中已按本地优先处理。如需上游的某项修改，请根据此报告手动恢复。\n\n`;
+        for (const file of conflictFiles) {
+          const fileName = String(file);
+          if (!existsSync(fileName)) continue;
 
-      for (const file of conflictFiles) {
-        const fileName = String(file); // 修复 Lint 报错：确保是 string 类型
-        if (!existsSync(fileName)) continue;
+          mdContent += `### 📄 文件: \`${fileName}\`\n\n`;
 
-        mdContent += `### 📄 文件: \`${fileName}\`\n\n`;
+          try {
+            const content = readFileSync(fileName, "utf8");
+            const conflictBlocks = content.match(/^<<<<<<<[\s\S]*?^>>>>>>>/gm);
 
-        try {
-          const content = readFileSync(fileName, "utf8");
-          // 提取冲突标记块
-          const conflictBlocks = content.match(/^<<<<<<<[\s\S]*?^>>>>>>>/gm);
+            if (conflictBlocks) {
+              const ext = extname(fileName).slice(1) || "text";
+              const lang =
+                ext === "ts" || ext === "tsx" ? "typescript" : ext === "js" ? "javascript" : ext;
 
-          if (conflictBlocks) {
-            const ext = extname(fileName).slice(1) || "text";
-            const lang =
-              ext === "ts" || ext === "tsx" ? "typescript" : ext === "js" ? "javascript" : ext;
-
-            conflictBlocks.forEach((block, i) => {
-              mdContent += `#### 冲突块 #${i + 1}\n\`\`\`${lang}\n${block}\n\`\`\`\n\n`;
-            });
+              conflictBlocks.forEach((block, i) => {
+                mdContent += `#### 冲突块 #${i + 1}\n\`\`\`${lang}\n${block}\n\`\`\`\n\n`;
+              });
+            }
+          } catch (e) {
+            mdContent += `*无法读取冲突详情: ${e.message}*\n\n`;
           }
-        } catch (e) {
-          mdContent += `*无法读取冲突详情: ${e.message}*\n\n`;
+          mdContent += `\n---\n\n`;
         }
-        mdContent += `\n---\n\n`;
-      }
 
-      writeFileSync(logFilePath, mdContent);
-      console.log(
-        `${GREEN}✔ 已检测到 ${conflictFiles.length} 个冲突文件，报告已生成: ${logFilePath}${RESET}`,
-      );
+        writeFileSync(logFilePath, mdContent);
+        console.log(
+          `${GREEN}✔ 已检测到 ${conflictFiles.length} 个冲突文件，报告已生成: ${logFilePath}${RESET}`,
+        );
+      }
     } finally {
       // --- 3. 清理现场，准备执行真正的 -X ours 合并 ---
       await $`git merge --abort`.quiet().nothrow();
@@ -196,6 +209,8 @@ async function generateConflictReport(version) {
   } catch (e) {
     console.error(`  ${RED}✘ 冲突报告失败 ${version}: ${e.message}${RESET}`);
   }
+
+  return R;
 }
 
 async function handlePackageJsonConflict(filePath) {

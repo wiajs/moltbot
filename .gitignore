@@ -26,6 +26,7 @@ dist/
 *.bun-build
 
 # Logs
+/sync/
 log/
 *.log
 npm-debug.log*

@@ -99,6 +99,7 @@
     "protocol:gen:swift": "bun scripts/protocol-gen-swift.ts",
     "release:check": "bun scripts/release-check.ts",
     "start": "bun scripts/run-node.mjs",
+    "sync": "bun mergeclaw.js",
     "test": "bun scripts/test-parallel.mjs",
     "test:all": "bun run lint && bun run build && bun run test && bun run test:e2e && bun run test:live && bun run test:docker:all",
     "test:coverage": "vitest run --coverage",
