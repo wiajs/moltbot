@@ -195,7 +195,7 @@ async function generateConflictReport(version) {
                   } else {
                     if (mode === "local") {
                       // 为本地修改部分添加行号前缀
-                      const lineNum = (i + 1).toString().padStart(4, " ");
+                      const lineNum = i.toString().padStart(4, " ");
                       localPart.push(`${lineNum} | ${lines[i]}`);
                     } else {
                       upstreamPart.push(lines[i]);

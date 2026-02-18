@@ -3,6 +3,9 @@ node_modules
 **/node_modules/
 .pnpm-store
 
+__pycache__/
+*.pyc
+
 # Lock files (Ignore non-Bun lockfiles to force Bun usage)
 pnpm-lock.yaml
 pnpm-workspace.yaml
@@ -10,6 +13,7 @@ package-lock.json
 yarn.lock
 
 # Bun Lockfile (Do NOT ignore bun.lockb, it should be committed)
+# bun.lock
 # bun.lockb 
 
 # Environment variables
@@ -24,6 +28,7 @@ docker-compose.extra.yml
 dist
 dist/
 *.bun-build
+.tsbuildinfo
 
 # Logs
 /sync/
@@ -46,13 +51,21 @@ ui/test-results/
 **/.DS_Store
 Thumbs.db
 
-# Bun/App Build artifacts
+# Android build artifacts
+apps/android/.gradle/
+apps/android/app/build/
+apps/android/.cxx/
+
+# Bun build artifacts
+*.bun-build
 apps/macos/.build/
 apps/shared/MoltbotKit/.build/
 apps/shared/OpenClawKit/.build/
 apps/shared/OpenClawKit/Package.resolved
 **/ModuleCache/
 bin/
+bin/clawdbot-mac
+bin/docs-list
 apps/macos/.build-local/
 apps/macos/.swiftpm/
 apps/shared/MoltbotKit/.swiftpm/
@@ -63,9 +76,13 @@ Core/
 apps/ios/*.xcodeproj/
 apps/ios/*.xcworkspace/
 apps/ios/.swiftpm/
-apps/ios/*.xcfilelist
+apps/ios/.derivedData/
+apps/ios/.local-signing.xcconfig
 apps/ios/Clawdbot.xcodeproj/
 apps/ios/Clawdbot.xcodeproj/**
+apps/macos/.build/**
+**/*.bun-build
+apps/ios/*.xcfilelist
 apps/ios/*.ipa
 apps/ios/*.dSYM.zip
 apps/ios/*.mobileprovision
@@ -96,7 +113,6 @@ USER.md
 
 # Local tooling
 .serena/
-.vscode/
 .idea/
 
 # Agent credentials and memory (NEVER COMMIT)
