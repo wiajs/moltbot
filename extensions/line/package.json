@@ -1,6 +1,6 @@
 {
   "name": "@moltbot/line",
-  "version": "2026.2.15",
+  "version": "2026.2.16",
   "private": true,
   "description": "Moltbot LINE channel plugin",
   "type": "module",

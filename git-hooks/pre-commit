@@ -1,9 +1,55 @@
-#!/bin/sh
-FILES=$(git diff --cached --name-only --diff-filter=ACMR | sed 's| |\\ |g')
-[ -z "$FILES" ] && exit 0
+#!/usr/bin/env bun
+import { $ } from "bun";
+import { join } from "node:path";
+import { existsSync } from "node:fs";
 
-echo "$FILES" | xargs pnpm lint --fix
-echo "$FILES" | xargs pnpm format --no-error-on-unmatched-pattern
-echo "$FILES" | xargs git add
+// 1. 设置基础路径
+// 获取 Git 根目录 (去除末尾换行符)
+const rootDir = (await $`git rev-parse --show-toplevel`.text()).trim();
+const runNodeTool = join(rootDir, "scripts/pre-commit/run-node-tool.js");
+const filterFilesScript = join(rootDir, "scripts/pre-commit/filter-staged-files.mjs");
 
-exit 0
+// --- 2. 检查环境 ---
+if (!existsSync(runNodeTool) || !existsSync(filterFilesScript)) {
+  console.error("❌ Critical: Missing helper scripts in scripts/pre-commit/");
+  process.exit(1);
+}
+
+// 3. 获取暂存区文件列表 (核心逻辑)
+// git diff -z 输出以 \0 分隔的文件名，.text() 获取文本，然后用 split('\0') 分割
+const diffOutput = await $`git diff --cached --name-only --diff-filter=ACMR -z`.quiet().text();
+// 过滤掉空字符串（因为 split 可能会在末尾产生一个空项）
+const files = diffOutput.split("\0").filter((f) => f.length > 0);
+
+if (files.length === 0) {
+  process.exit(0);
+}
+
+// --- 4. 过滤文件 (Memory -> Filter Script -> Memory) ---
+const getFilteredFiles = async (mode: "lint" | "format") => {
+  // 直接调用 bun 运行 ts 脚本
+  // 这里的 ${files} 会被 Bun Shell 自动展开为多个参数，非常安全
+  const output = await $`bun ${filterFilesScript} ${mode} -- ${files}`.quiet().text();
+  // 解析 \0 分隔的输出
+  return output.split("\0").filter((f) => f.length > 0);
+};
+
+const lintFiles = await getFilteredFiles("lint");
+const formatFiles = await getFilteredFiles("format");
+
+// --- 5. 执行工具 (Memory -> Runner Script -> Tool) ---
+if (lintFiles.length > 0) {
+  console.log(`🔍 Linting ${lintFiles.length} files...`);
+  // 调用 run-node-tool.ts
+  await $`bun ${runNodeTool} oxlint --type-aware --fix -- ${lintFiles}`;
+}
+
+if (formatFiles.length > 0) {
+  console.log(`✨ Formatting ${formatFiles.length} files...`);
+  // 调用 run-node-tool.ts
+  await $`bun ${runNodeTool} oxfmt --write -- ${formatFiles}`;
+}
+
+// --- 6. 重新暂存 (Re-add) ---
+// 将自动修复后的变更重新加入本次提交
+await $`git add -- ${files}`;

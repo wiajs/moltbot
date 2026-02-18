@@ -1,6 +1,6 @@
 {
   "name": "@moltbot/zalouser",
-  "version": "2026.2.15",
+  "version": "2026.2.16",
   "description": "Moltbot Zalo Personal Account plugin via zca-cli",
   "type": "module",
   "dependencies": {

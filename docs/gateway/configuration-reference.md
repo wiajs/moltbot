@@ -589,11 +589,11 @@ Max characters per workspace bootstrap file before truncation. Default: `20000`.
 
 ### `agents.defaults.bootstrapTotalMaxChars`
 
-Max total characters injected across all workspace bootstrap files. Default: `24000`.
+Max total characters injected across all workspace bootstrap files. Default: `150000`.
 
 ```json5
 {
-  agents: { defaults: { bootstrapTotalMaxChars: 24000 } },
+  agents: { defaults: { bootstrapTotalMaxChars: 150000 } },
 }
 ```
 
@@ -718,6 +718,7 @@ Periodic heartbeat runs.
         target: "last", // last | whatsapp | telegram | discord | ... | none
         prompt: "Read HEARTBEAT.md if it exists...",
         ackMaxChars: 300,
+        suppressToolErrorWarnings: false,
       },
     },
   },
@@ -725,6 +726,7 @@ Periodic heartbeat runs.
 ```
 
 - `every`: duration string (ms/s/m/h). Default: `30m`.
+- `suppressToolErrorWarnings`: when true, suppresses tool error warning payloads during heartbeat runs.
 - Per-agent: set `agents.list[].heartbeat`. When any agent defines `heartbeat`, **only those agents** run heartbeats.
 - Heartbeats run full agent turns — shorter intervals burn more tokens.
 
@@ -1507,6 +1509,31 @@ Provider auth follows standard order: auth profiles → env vars → `models.pro
   },
 }
 ```
+
+### `tools.sessions`
+
+Controls which sessions can be targeted by the session tools (`sessions_list`, `sessions_history`, `sessions_send`).
+
+Default: `tree` (current session + sessions spawned by it, such as subagents).
+
+```json5
+{
+  tools: {
+    sessions: {
+      // "self" | "tree" | "agent" | "all"
+      visibility: "tree",
+    },
+  },
+}
+```
+
+Notes:
+
+- `self`: only the current session key.
+- `tree`: current session + sessions spawned by the current session (subagents).
+- `agent`: any session belonging to the current agent id (can include other users if you run per-sender sessions under the same agent id).
+- `all`: any session. Cross-agent targeting still requires `tools.agentToAgent`.
+- Sandbox clamp: when the current session is sandboxed and `agents.defaults.sandbox.sessionToolsVisibility="spawned"`, visibility is forced to `tree` even if `tools.sessions.visibility="all"`.
 
 ### `tools.subagents`
 
@@ -2295,7 +2322,7 @@ Current builds no longer include the TCP bridge. Nodes connect over the Gateway 
   cron: {
     enabled: true,
     maxConcurrentRuns: 2,
-    webhook: "https://example.invalid/cron-finished", // optional, must be http:// or https://
+    webhook: "https://example.invalid/legacy", // deprecated fallback for stored notify:true jobs
     webhookToken: "replace-with-dedicated-token", // optional bearer token for outbound webhook auth
     sessionRetention: "24h", // duration string or false
   },
@@ -2303,8 +2330,8 @@ Current builds no longer include the TCP bridge. Nodes connect over the Gateway 
 ```
 
 - `sessionRetention`: how long to keep completed cron sessions before pruning. Default: `24h`.
-- `webhook`: finished-run webhook endpoint, only used when the job has `notify: true`.
-- `webhookToken`: dedicated bearer token for webhook auth, if omitted no auth header is sent.
+- `webhookToken`: bearer token used for cron webhook POST delivery (`delivery.mode = "webhook"`), if omitted no auth header is sent.
+- `webhook`: deprecated legacy fallback webhook URL (http/https) used only for stored jobs that still have `notify: true`.
 
 See [Cron Jobs](/automation/cron-jobs).
 

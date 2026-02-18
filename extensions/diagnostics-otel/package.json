@@ -1,6 +1,6 @@
 {
   "name": "@moltbot/diagnostics-otel",
-  "version": "2026.2.15",
+  "version": "2026.2.16",
   "description": "Moltbot diagnostics OpenTelemetry exporter",
   "type": "module",
   "dependencies": {
