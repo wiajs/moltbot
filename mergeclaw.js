@@ -141,7 +141,6 @@ async function generateConflictReport(version) {
     let logFileName = `${version}.md`;
     let logFilePath = join(syncDir, logFileName);
     let counter = 1;
-
     while (existsSync(logFilePath)) {
       counter++;
       logFileName = `${version}-${counter}.md`;
@@ -151,9 +150,7 @@ async function generateConflictReport(version) {
     R = logFilePath;
 
     let conflictFiles = [];
-
     console.log(`${YELLOW}🔍 正在检测冲突...${RESET}`);
-
     // --- 1. 模拟合并以获取冲突列表 ---
     try {
       // 使用 --no-commit --no-ff 执行一次标准合并（不带 -X ours）
@@ -165,7 +162,7 @@ async function generateConflictReport(version) {
       conflictFiles = diffOutput.split("\n").filter((f) => f.length > 0);
 
       if (conflictFiles.length === 0)
-        writeFileSync(logFilePath, `# Merge Report - ${version}\n\n✅ 本次合并无代码冲突。`);
+        writeFileSync(logFilePath, `# Sync Report - ${version}\n\n✅ 本次合并无代码冲突。`);
       else {
         // --- 2. 提取冲突内容并写入 Markdown ---
         let mdContent = `# ⚠️ 冲突报告 (已被 -X ours 自动覆盖) - ${version}\n\n`;
@@ -176,25 +173,55 @@ async function generateConflictReport(version) {
           const fileName = String(file);
           if (!existsSync(fileName)) continue;
 
-          mdContent += `### 📄 文件: \`${fileName}\`\n\n`;
+          mdContent += `### 文件: \`${fileName}\`\n\n`;
 
           try {
-            const content = readFileSync(fileName, "utf8");
-            const conflictBlocks = content.match(/^<<<<<<<[\s\S]*?^>>>>>>>/gm);
+            const fileContent = readFileSync(fileName, "utf8");
+            const lines = fileContent.split("\n");
+            let blockIndex = 1;
+            let i = 0;
+            while (i < lines.length) {
+              // 检测冲突开始
+              if (lines[i].startsWith("<<<<<<<")) {
+                let localPart = [];
+                let upstreamPart = [];
+                let mode = "local";
+                const startLine = i + 1; // 记录冲突块开始的行号
 
-            if (conflictBlocks) {
-              const ext = extname(fileName).slice(1) || "text";
-              const lang =
-                ext === "ts" || ext === "tsx" ? "typescript" : ext === "js" ? "javascript" : ext;
+                i++; // 跳过 <<<<<<< HEAD
+                while (i < lines.length && !lines[i].startsWith(">>>>>>>")) {
+                  if (lines[i].startsWith("=======")) {
+                    mode = "upstream";
+                  } else {
+                    if (mode === "local") {
+                      // 为本地修改部分添加行号前缀
+                      const lineNum = (i + 1).toString().padStart(4, " ");
+                      localPart.push(`${lineNum} | ${lines[i]}`);
+                    } else {
+                      upstreamPart.push(lines[i]);
+                    }
+                  }
+                  i++;
+                }
+                const ext = extname(fileName).slice(1) || "text";
+                const lang =
+                  ext === "ts" || ext === "tsx" ? "typescript" : ext === "js" ? "javascript" : ext;
 
-              conflictBlocks.forEach((block, i) => {
-                mdContent += `#### 冲突块 #${i + 1}\n\`\`\`${lang}\n${block}\n\`\`\`\n\n`;
-              });
+                mdContent += `#### 冲突块 #${blockIndex++}\n`;
+                mdContent += `\`\`\`${lang}\n`;
+                mdContent += `<<<<<<< 本地修改 (起始行: ${startLine})\n`;
+                mdContent += localPart.join("\n") + "\n";
+                mdContent += `=======\n`;
+                mdContent += upstreamPart.join("\n") + "\n";
+                mdContent += `>>>>>>>\n`;
+                mdContent += `\`\`\`\n`; // 去掉这里原本多余的 \n
+              }
+              i++;
             }
           } catch (e) {
             mdContent += `*无法读取冲突详情: ${e.message}*\n\n`;
           }
-          mdContent += `\n---\n\n`;
+          mdContent += `---\n\n`;
         }
 
         writeFileSync(logFilePath, mdContent);
