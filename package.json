@@ -53,7 +53,7 @@
     "android:install": "cd apps/android && ./gradlew :app:installDebug",
     "android:run": "cd apps/android && ./gradlew :app:installDebug && adb shell am start -n ai.openclaw.android/.MainActivity",
     "android:test": "cd apps/android && ./gradlew :app:testDebugUnitTest",
-    "build": "bun run canvas:a2ui:bundle && (bun run build:js & bun run build:dts & wait) && bun scripts/post-build.ts && && bun scripts/write-stamp.js",
+    "build": "bun run canvas:a2ui:bundle && (bun run build:js & bun run build:dts & wait) && bun scripts/post-build.ts && bun scripts/write-stamp.js",
     "build:dts": "bun run build:plugin-sdk:dts",
     "build:js": "bunx tsdown",
     "build:plugin-sdk:dts": "tsc -p tsconfig.plugin-sdk.dts.json",
