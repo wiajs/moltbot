@@ -1,3 +1,8 @@
+/**
+ * Gateway WebSocket Handlers
+ * 负责处理来自客户端的 WebSocket 连接和消息，验证身份，并将请求分发到对应的处理函数。
+ * 通过 attachGatewayWsHandlers 将 WebSocket 相关的处理逻辑集中在一起，简化主 Gateway 的启动流程。
+ */
 import type { WebSocketServer } from "ws";
 import type { createSubsystemLogger } from "../logging/subsystem.js";
 import type { AuthRateLimiter } from "./auth-rate-limit.js";
@@ -6,6 +11,10 @@ import type { GatewayRequestContext, GatewayRequestHandlers } from "./server-met
 import { attachGatewayWsConnectionHandler } from "./server/ws-connection.js";
 import type { GatewayWsClient } from "./server/ws-types.js";
 
+/**
+ *
+ * @param params
+ */
 export function attachGatewayWsHandlers(params: {
   wss: WebSocketServer;
   clients: Set<GatewayWsClient>;

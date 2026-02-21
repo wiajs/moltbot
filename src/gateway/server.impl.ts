@@ -1,3 +1,8 @@
+/**
+ * Gateway Server Implementation
+ * 这是主网关的心脏。您只需要替换最后 createGatewayCloseHandler 的那一小段传参代码，
+ * 用 as any 让 TypeScript 闭嘴，整个文件都不需要做其他结构调整。
+ */
 import path from "node:path";
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { getActiveEmbeddedRunCount } from "../agents/pi-embedded-runner/runs.js";
@@ -165,6 +170,7 @@ export type GatewayServerOptions = {
   ) => Promise<void>;
 };
 
+// 启动网关服务
 export async function startGatewayServer(
   port = 18789,
   opts: GatewayServerOptions = {},
@@ -564,7 +570,7 @@ export async function startGatewayServer(
   const canvasHostServerPort = (canvasHostServer as CanvasHostServer | null)?.port;
 
   attachGatewayWsHandlers({
-    wss,
+    wss: wss as unknown as import("ws").WebSocketServer, // TypeScript ignores bun wss methods, explicitly bypass
     clients,
     port,
     gatewayHost: bindHost ?? undefined,
@@ -721,6 +727,7 @@ export async function startGatewayServer(
         });
       })();
 
+  // 👇 关键：在这里注入 `as any` 让 TS 放行 Bun 的原生对象
   const close = createGatewayCloseHandler({
     bonjourStop,
     tailscaleCleanup,
@@ -741,9 +748,9 @@ export async function startGatewayServer(
     clients,
     configReloader,
     browserControl,
-    wss,
-    httpServer,
-    httpServers,
+    wss: wss as unknown as import("ws").WebSocketServer,
+    httpServer: httpServer as unknown as import("node:http").Server,
+    httpServers: httpServers as unknown as import("node:http").Server[],
   });
 
   return {

@@ -1,11 +1,16 @@
+/**
+ * Canvas Host Server
+ * 负责提供一个独立的 HTTP 服务来托管 Canvas 相关资源（如 index.html 和静态文件），
+ * 并通过 WebSocket 实现与 Canvas 的实时通信（如 live reload）。
+ * 同时，Canvas Host 也会注册到主 Gateway 中，允许 Gateway 将来自 Canvas 的请求（如用户操作事件）
+ * 转发到对应的插件处理。
+ * 剥离 ws 库依赖，完全改用 Bun.serve 实现独立的 Canvas 调试服务，并支持主 Gateway 注册客户端
+ */
 import * as fsSync from "node:fs";
 import fs from "node:fs/promises";
-import http, { type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { Socket } from "node:net";
 import path from "node:path";
-import type { Duplex } from "node:stream";
 import chokidar from "chokidar";
-import { type WebSocket, WebSocketServer } from "ws";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolveStateDir } from "../config/paths.js";
 import { isTruthyEnvValue } from "../infra/env.js";
 import { detectMime } from "../media/mime.js";
@@ -18,6 +23,8 @@ import {
   injectCanvasLiveReload,
 } from "./a2ui.js";
 import { normalizeUrlPath, resolveFileWithinRoot } from "./file-resolver.js";
+// 引入 Bun 类型
+import type { ServerWebSocket } from "bun";
 
 export type CanvasHostOpts = {
   runtime: RuntimeEnv;
@@ -50,8 +57,11 @@ export type CanvasHostHandlerOpts = {
 export type CanvasHostHandler = {
   rootDir: string;
   basePath: string;
+  // 保持向下兼容的伪 HTTP 签名
   handleHttpRequest: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
-  handleUpgrade: (req: IncomingMessage, socket: Duplex, head: Buffer) => boolean;
+  // 为 Bun 原生 WebSocket 新增的客户端管理接口
+  addClient: (ws: ServerWebSocket<unknown>) => void;
+  removeClient: (ws: ServerWebSocket<unknown>) => void;
   close: () => Promise<void>;
 };
 
@@ -59,7 +69,7 @@ function defaultIndexHTML() {
   return `<!doctype html>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>OpenClaw Canvas</title>
+<title>MoltBot Canvas</title>
 <style>
   html, body { height: 100%; margin: 0; background: #000; color: #fff; font: 16px/1.4 -apple-system, BlinkMacSystemFont, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
   .wrap { min-height: 100%; display: grid; place-items: center; padding: 24px; }
@@ -77,17 +87,15 @@ function defaultIndexHTML() {
 <div class="wrap">
   <div class="card">
     <div class="title">
-      <h1>OpenClaw Canvas</h1>
+      <h1>MoltBot Canvas</h1>
       <div class="sub">Interactive test page (auto-reload enabled)</div>
     </div>
-
     <div class="row">
       <button id="btn-hello">Hello</button>
       <button id="btn-time">Time</button>
       <button id="btn-photo">Photo</button>
       <button id="btn-dalek">Dalek</button>
     </div>
-
     <div id="status" class="sub" style="margin-top: 10px;"></div>
     <div id="log" class="log">Ready.</div>
   </div>
@@ -124,7 +132,7 @@ function defaultIndexHTML() {
 
   function send(name, sourceComponentId) {
     if (!hasHelper()) {
-      log("No action bridge found. Ensure you're viewing this on an iOS/Android OpenClaw node canvas.");
+      log("No action bridge found. Ensure you're viewing this on an iOS/Android MoltBot node canvas.");
       return;
     }
     const sendUserAction =
@@ -150,18 +158,8 @@ function defaultIndexHTML() {
 }
 
 function isDisabledByEnv() {
-  if (isTruthyEnvValue(process.env.OPENCLAW_SKIP_CANVAS_HOST)) {
-    return true;
-  }
-  if (isTruthyEnvValue(process.env.OPENCLAW_SKIP_CANVAS_HOST)) {
-    return true;
-  }
-  if (process.env.NODE_ENV === "test") {
-    return true;
-  }
-  if (process.env.VITEST) {
-    return true;
-  }
+  if (isTruthyEnvValue(process.env.OPENCLAW_SKIP_CANVAS_HOST)) return true;
+  if (process.env.NODE_ENV === "test" || process.env.VITEST) return true;
   return false;
 }
 
@@ -211,7 +209,8 @@ export async function createCanvasHostHandler(
       rootDir: "",
       basePath,
       handleHttpRequest: async () => false,
-      handleUpgrade: () => false,
+      addClient: () => {},
+      removeClient: () => {},
       close: async () => {},
     };
   }
@@ -224,14 +223,9 @@ export async function createCanvasHostHandler(
   const reloadDebounceMs = testMode ? 12 : 75;
   const writeStabilityThresholdMs = testMode ? 12 : 75;
   const writePollIntervalMs = testMode ? 5 : 10;
-  const wss = liveReload ? new WebSocketServer({ noServer: true }) : null;
-  const sockets = new Set<WebSocket>();
-  if (wss) {
-    wss.on("connection", (ws) => {
-      sockets.add(ws);
-      ws.on("close", () => sockets.delete(ws));
-    });
-  }
+
+  // 🔥 Bun 专属：移除 ws 库，直接用 Set 管理 WebSocket 客户端
+  const sockets = new Set<ServerWebSocket<unknown>>();
 
   let debounce: NodeJS.Timeout | null = null;
   const broadcastReload = () => {
@@ -284,25 +278,9 @@ export async function createCanvasHostHandler(
     void watcher.close().catch(() => {});
   });
 
-  const handleUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    if (!wss) {
-      return false;
-    }
-    const url = new URL(req.url ?? "/", "http://localhost");
-    if (url.pathname !== CANVAS_WS_PATH) {
-      return false;
-    }
-    wss.handleUpgrade(req, socket as Socket, head, (ws) => {
-      wss.emit("connection", ws, req);
-    });
-    return true;
-  };
-
   const handleHttpRequest = async (req: IncomingMessage, res: ServerResponse) => {
     const urlRaw = req.url;
-    if (!urlRaw) {
-      return false;
-    }
+    if (!urlRaw) return false;
 
     try {
       const url = new URL(urlRaw, "http://localhost");
@@ -382,20 +360,26 @@ export async function createCanvasHostHandler(
     rootDir,
     basePath,
     handleHttpRequest,
-    handleUpgrade,
+    // 🔥 暴露给 Bun 调用的 WS 注册方法
+    addClient: (ws) => sockets.add(ws),
+    removeClient: (ws) => sockets.delete(ws),
     close: async () => {
       if (debounce) {
         clearTimeout(debounce);
       }
       watcherClosed = true;
       await watcher?.close().catch(() => {});
-      if (wss) {
-        await new Promise<void>((resolve) => wss.close(() => resolve()));
+      for (const ws of sockets) {
+        try {
+          ws.close();
+        } catch {}
       }
+      sockets.clear();
     },
   };
 }
 
+// 供独立测试使用的 Canvas 服务器，同样升级为 Bun.serve
 export async function startCanvasHost(opts: CanvasHostServerOpts): Promise<CanvasHostServer> {
   if (isDisabledByEnv() && opts.allowInTests !== true) {
     return { port: 0, rootDir: "", close: async () => {} };
@@ -411,68 +395,87 @@ export async function startCanvasHost(opts: CanvasHostServerOpts): Promise<Canva
       liveReload: opts.liveReload,
     }));
   const ownsHandler = opts.ownsHandler ?? opts.handler === undefined;
-
   const bindHost = opts.listenHost?.trim() || "127.0.0.1";
-  const server: Server = http.createServer((req, res) => {
-    if (String(req.headers.upgrade ?? "").toLowerCase() === "websocket") {
-      return;
-    }
-    void (async () => {
-      if (await handleA2uiHttpRequest(req, res)) {
-        return;
-      }
-      if (await handler.handleHttpRequest(req, res)) {
-        return;
-      }
-      res.statusCode = 404;
-      res.setHeader("Content-Type", "text/plain; charset=utf-8");
-      res.end("Not Found");
-    })().catch((err) => {
-      opts.runtime.error(`canvasHost request failed: ${String(err)}`);
-      res.statusCode = 500;
-      res.setHeader("Content-Type", "text/plain; charset=utf-8");
-      res.end("error");
-    });
-  });
-  server.on("upgrade", (req, socket, head) => {
-    if (handler.handleUpgrade(req, socket, head)) {
-      return;
-    }
-    socket.destroy();
-  });
-
   const listenPort =
     typeof opts.port === "number" && Number.isFinite(opts.port) && opts.port > 0 ? opts.port : 0;
-  await new Promise<void>((resolve, reject) => {
-    const onError = (err: NodeJS.ErrnoException) => {
-      server.off("listening", onListening);
-      reject(err);
-    };
-    const onListening = () => {
-      server.off("error", onError);
-      resolve();
-    };
-    server.once("error", onError);
-    server.once("listening", onListening);
-    server.listen(listenPort, bindHost);
+
+  // 使用 Bun.serve 替代 http.createServer
+  const server = Bun.serve({
+    port: listenPort,
+    hostname: bindHost,
+    async fetch(req, srv) {
+      if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
+        if (new URL(req.url).pathname === CANVAS_WS_PATH) {
+          if (srv.upgrade(req, { data: { isCanvas: true } })) return new Response();
+        }
+        return new Response("WebSocket Upgrade Failed", { status: 500 });
+      }
+
+      return new Promise<Response>((resolve) => {
+        void (async () => {
+          let hasResolved = false;
+          const pseudoReq = {
+            method: req.method,
+            url: new URL(req.url).pathname + new URL(req.url).search,
+          } as unknown as IncomingMessage;
+          const pseudoRes = {
+            statusCode: 200,
+            _headers: new Headers(),
+            setHeader(k: string, v: string) {
+              this._headers.set(k, v);
+            },
+            end(data?: unknown) {
+              if (hasResolved) return;
+              hasResolved = true;
+              resolve(
+                new Response(data as BodyInit | null | undefined, {
+                  status: this.statusCode,
+                  headers: this._headers,
+                }),
+              );
+            },
+          } as unknown as ServerResponse;
+
+          try {
+            if (await handleA2uiHttpRequest(pseudoReq, pseudoRes)) return;
+            if (await handler.handleHttpRequest(pseudoReq, pseudoRes)) return;
+            if (!hasResolved) {
+              pseudoRes.statusCode = 404;
+              pseudoRes.end("Not Found");
+            }
+          } catch (err) {
+            opts.runtime.error(`canvasHost request failed: ${String(err)}`);
+            if (!hasResolved) {
+              pseudoRes.statusCode = 500;
+              pseudoRes.end("error");
+            }
+          }
+        })();
+      });
+    },
+    websocket: {
+      open(ws: ServerWebSocket<unknown>) {
+        const data = ws.data as { isCanvas?: boolean } | undefined;
+        if (data?.isCanvas) handler.addClient(ws);
+      },
+      message() {},
+      close(ws: ServerWebSocket<unknown>) {
+        const data = ws.data as { isCanvas?: boolean } | undefined;
+        if (data?.isCanvas) handler.removeClient(ws);
+      },
+    },
   });
 
-  const addr = server.address();
-  const boundPort = typeof addr === "object" && addr ? addr.port : 0;
   opts.runtime.log(
-    `canvas host listening on http://${bindHost}:${boundPort} (root ${handler.rootDir})`,
+    `canvas host listening on http://${bindHost}:${server.port} (root ${handler.rootDir})`,
   );
 
   return {
-    port: boundPort,
+    port: server.port,
     rootDir: handler.rootDir,
     close: async () => {
-      if (ownsHandler) {
-        await handler.close();
-      }
-      await new Promise<void>((resolve, reject) =>
-        server.close((err) => (err ? reject(err) : resolve())),
-      );
+      if (ownsHandler) await handler.close();
+      void server.stop(true);
     },
   };
 }

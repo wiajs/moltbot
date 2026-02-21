@@ -1,37 +1,13 @@
-import type { Server as HttpServer } from "node:http";
-import { GatewayLockError } from "../../infra/gateway-lock.js";
+/**
+ * 因为 Bun.serve 在声明时就已经完成了端口绑定，原来的重试和监听逻辑废弃。
+ * 将它变成空函数，避免其他未被发现的旧代码调用时抛出 undefined 错误。
+ */
 
-export async function listenGatewayHttpServer(params: {
-  httpServer: HttpServer;
+// Bun 原生 serve 会在创建时自动绑定端口，这里保留签名的空壳以防止外部调用报错
+export async function listenGatewayHttpServer(_params: {
+  httpServer: unknown;
   bindHost: string;
   port: number;
 }) {
-  const { httpServer, bindHost, port } = params;
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const onError = (err: NodeJS.ErrnoException) => {
-        httpServer.off("listening", onListening);
-        reject(err);
-      };
-      const onListening = () => {
-        httpServer.off("error", onError);
-        resolve();
-      };
-      httpServer.once("error", onError);
-      httpServer.once("listening", onListening);
-      httpServer.listen(port, bindHost);
-    });
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "EADDRINUSE") {
-      throw new GatewayLockError(
-        `another gateway instance is already listening on ws://${bindHost}:${port}`,
-        err,
-      );
-    }
-    throw new GatewayLockError(
-      `failed to bind gateway socket on ws://${bindHost}:${port}: ${String(err)}`,
-      err,
-    );
-  }
+  return Promise.resolve();
 }

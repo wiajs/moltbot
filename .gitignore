@@ -29,6 +29,7 @@ dist
 dist/
 *.bun-build
 .tsbuildinfo
+.dev_home/
 
 # Logs
 /sync/

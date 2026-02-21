@@ -1,12 +1,13 @@
-import {
-  createServer as createHttpServer,
-  type Server as HttpServer,
-  type IncomingMessage,
-  type ServerResponse,
-} from "node:http";
-import { createServer as createHttpsServer } from "node:https";
-import type { TlsOptions } from "node:tls";
-import type { WebSocketServer } from "ws";
+/**
+ * 网关服务器核心逻辑，包含 HTTP 请求处理和 WebSocket 连接管理
+ * 1. createBunGatewayHandlers: 创建适用于 Bun 的 HTTP 和 WebSocket 处理器，替代原有的 createGatewayHttpServer 和 attachGatewayUpgradeHandler
+ * 2. 授权检查工具函数：提供鉴权相关的辅助函数，如 authorizeCanvasRequest 等
+ * 3. Bun 原生 WebSocket 到传统 'ws' 库的兼容封装：定义 BunWs 和 BunWebSocketServer 类，模拟 'ws' 的接口以复用现有逻辑
+ * 4. 效率比 node.js 高几倍，但需要适配 Bun 的 Request/Response 模型和 WebSocket 事件
+ */
+import type { Server as BunServer, ServerWebSocket } from "bun";
+import { EventEmitter } from "node:events";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolveAgentAvatar } from "../agents/identity-avatar.js";
 import {
   A2UI_PATH,
@@ -48,7 +49,7 @@ import {
   resolveHookChannel,
   resolveHookDeliver,
 } from "./hooks.js";
-import { sendGatewayAuthFailure, setDefaultSecurityHeaders } from "./http-common.js";
+import { sendGatewayAuthFailure } from "./http-common.js";
 import { getBearerToken, getHeader } from "./http-utils.js";
 import {
   isPrivateOrLoopbackAddress,
@@ -67,6 +68,57 @@ type HookAuthFailure = { count: number; windowStartedAtMs: number };
 const HOOK_AUTH_FAILURE_LIMIT = 20;
 const HOOK_AUTH_FAILURE_WINDOW_MS = 60_000;
 const HOOK_AUTH_FAILURE_TRACK_MAX = 2048;
+
+// ============================================================================
+// 1. Bun 原生 WebSocket 到传统 'ws' 库的兼容封装
+// ============================================================================
+export class BunWs extends EventEmitter {
+  public _socket: { remoteAddress?: string };
+  constructor(public rawWs: ServerWebSocket<unknown>) {
+    super();
+    const data = rawWs.data as { req?: { socket?: { remoteAddress?: string } } } | undefined;
+    this._socket = { remoteAddress: data?.req?.socket?.remoteAddress };
+  }
+  send(data: string | Buffer) {
+    this.rawWs.send(data);
+  }
+  close(code?: number, reason?: string) {
+    this.rawWs.close(code, reason);
+  }
+  terminate() {
+    this.rawWs.close();
+  }
+  get readyState() {
+    return this.rawWs.readyState; // 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
+  }
+}
+
+export class BunWebSocketServer extends EventEmitter {
+  public clients = new Set<BunWs>();
+
+  handleOpen(rawWs: ServerWebSocket<unknown>) {
+    const shim = new BunWs(rawWs);
+    const data = rawWs.data as
+      | { shim?: BunWs; req?: IncomingMessage & { remoteAddress?: string } }
+      | undefined;
+    if (data) {
+      data.shim = shim;
+    }
+    this.clients.add(shim);
+    this.emit("connection", shim, data?.req);
+  }
+  handleMessage(rawWs: ServerWebSocket<unknown>, message: string | Buffer) {
+    const data = rawWs.data as { shim?: BunWs } | undefined;
+    data?.shim?.emit("message", message);
+  }
+  handleClose(rawWs: ServerWebSocket<unknown>, code: number, reason: string) {
+    const data = rawWs.data as { shim?: BunWs } | undefined;
+    if (data?.shim) {
+      this.clients.delete(data.shim);
+      data.shim.emit("close", code, reason);
+    }
+  }
+}
 
 type HookDispatchers = {
   dispatchWakeHook: (value: { text: string; mode: "now" | "next-heartbeat" }) => void;
@@ -92,6 +144,9 @@ function sendJson(res: ServerResponse, status: number, body: unknown) {
   res.end(JSON.stringify(body));
 }
 
+// ============================================================================
+// 鉴权工具函数
+// ============================================================================
 function isCanvasPath(pathname: string): boolean {
   return (
     pathname === A2UI_PATH ||
@@ -119,7 +174,7 @@ function hasAuthorizedNodeWsClientForIp(clients: Set<GatewayWsClient>, clientIp:
 }
 
 async function authorizeCanvasRequest(params: {
-  req: IncomingMessage;
+  req: IncomingMessage; // 适配 pseudoReq
   auth: ResolvedGatewayAuth;
   trustedProxies: string[];
   clients: Set<GatewayWsClient>;
@@ -173,35 +228,6 @@ async function authorizeCanvasRequest(params: {
     return { ok: true };
   }
   return lastAuthFailure ?? { ok: false, reason: "unauthorized" };
-}
-
-function writeUpgradeAuthFailure(
-  socket: { write: (chunk: string) => void },
-  auth: GatewayAuthResult,
-) {
-  if (auth.rateLimited) {
-    const retryAfterSeconds =
-      auth.retryAfterMs && auth.retryAfterMs > 0 ? Math.ceil(auth.retryAfterMs / 1000) : undefined;
-    socket.write(
-      [
-        "HTTP/1.1 429 Too Many Requests",
-        retryAfterSeconds ? `Retry-After: ${retryAfterSeconds}` : undefined,
-        "Content-Type: application/json; charset=utf-8",
-        "Connection: close",
-        "",
-        JSON.stringify({
-          error: {
-            message: "Too many failed authentication attempts. Please try again later.",
-            type: "rate_limited",
-          },
-        }),
-      ]
-        .filter(Boolean)
-        .join("\r\n"),
-    );
-    return;
-  }
-  socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
 }
 
 export type HooksRequestHandler = (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
@@ -454,7 +480,10 @@ export function createHooksRequestHandler(
   };
 }
 
-export function createGatewayHttpServer(opts: {
+// ============================================================================
+// 统一网关处理器 (替代原有的 createGatewayHttpServer 和 attachGatewayUpgradeHandler)
+// ============================================================================
+export function createBunGatewayHandlers(opts: {
   canvasHost: CanvasHostHandler | null;
   clients: Set<GatewayWsClient>;
   controlUiEnabled: boolean;
@@ -463,13 +492,13 @@ export function createGatewayHttpServer(opts: {
   openAiChatCompletionsEnabled: boolean;
   openResponsesEnabled: boolean;
   openResponsesConfig?: import("../config/types.gateway.js").GatewayHttpResponsesConfig;
-  handleHooksRequest: HooksRequestHandler;
-  handlePluginRequest?: HooksRequestHandler;
+  handleHooksRequest: HooksRequestHandler; // 建议后续重构为接收 Request 返回 Response
+  handlePluginRequest?: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
   resolvedAuth: ResolvedGatewayAuth;
   /** Optional rate limiter for auth brute-force protection. */
   rateLimiter?: AuthRateLimiter;
-  tlsOptions?: TlsOptions;
-}): HttpServer {
+  wss: BunWebSocketServer; // 传入 Bun WebSocket
+}) {
   const {
     canvasHost,
     clients,
@@ -483,180 +512,267 @@ export function createGatewayHttpServer(opts: {
     handlePluginRequest,
     resolvedAuth,
     rateLimiter,
+    wss,
   } = opts;
-  const httpServer: HttpServer = opts.tlsOptions
-    ? createHttpsServer(opts.tlsOptions, (req, res) => {
-        void handleRequest(req, res);
-      })
-    : createHttpServer((req, res) => {
-        void handleRequest(req, res);
+
+  return {
+    async fetch(req: Request, server: BunServer): Promise<Response> {
+      const url = new URL(req.url ?? "/", "http://localhost");
+
+      // 1. WebSocket 升级与鉴权拦截
+      if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
+        // 🔥 核心修复：将构造带有完整 headers 的伪装请求提取到最外层！
+        // 这样不仅 Canvas，底部的核心网关连接也能正确拿到 Host 和 Origin
+        const pseudoWsReq = {
+          headers: Object.fromEntries(req.headers.entries()),
+          socket: { remoteAddress: server.requestIP(req)?.address },
+          url: url.pathname + url.search,
+          method: req.method,
+        } as unknown as IncomingMessage;
+
+        if (canvasHost) {
+          if (url.pathname === CANVAS_WS_PATH) {
+            const configSnapshot = loadConfig();
+            const trustedProxies = configSnapshot.gateway?.trustedProxies ?? [];
+
+            const ok = await authorizeCanvasRequest({
+              req: pseudoWsReq,
+              auth: resolvedAuth,
+              trustedProxies,
+              clients,
+              rateLimiter,
+            });
+
+            if (!ok.ok) {
+              if (ok.rateLimited) {
+                const retryAfter =
+                  ok.retryAfterMs && ok.retryAfterMs > 0
+                    ? Math.ceil(ok.retryAfterMs / 1000)
+                    : undefined;
+                return new Response(
+                  JSON.stringify({
+                    error: {
+                      message: "Too many failed authentication attempts.",
+                      type: "rate_limited",
+                    },
+                  }),
+                  {
+                    status: 429,
+                    headers: {
+                      "Content-Type": "application/json; charset=utf-8",
+                      ...(retryAfter ? { "Retry-After": String(retryAfter) } : {}),
+                    },
+                  },
+                );
+              }
+              return new Response("Unauthorized", { status: 401 });
+            }
+
+            // 挂载 Canvas 专属标识，并交由 Bun 升级
+            if (server.upgrade(req, { data: { req: pseudoWsReq, isCanvas: true } })) {
+              return new Response();
+            }
+          }
+        }
+
+        // 交由 Bun 原生引擎接管 WebSocket
+        if (server.upgrade(req, { data: { req: pseudoWsReq, isCanvas: false } })) {
+          return new Response();
+        }
+        return new Response("WebSocket Upgrade Failed", { status: 500 });
+      }
+
+      // ======================================================================
+      // 2. HTTP 路由 (通过 Promise 包装，完美模拟 Node.js Req/Res 模型)
+      // ======================================================================
+      return new Promise<Response>((resolve) => {
+        void (async () => {
+          let hasResolved = false;
+
+          // 预读取 Body 以支持旧版 req.on('data') 流式读取
+          let bodyBuffer = Buffer.alloc(0);
+          if (req.method !== "GET" && req.method !== "HEAD" && req.body) {
+            try {
+              bodyBuffer = Buffer.from(await req.arrayBuffer());
+            } catch {}
+          }
+
+          // 构造高度逼真的 Node.js 模拟对象
+          const pseudoReq = {
+            headers: Object.fromEntries(req.headers.entries()),
+            socket: { remoteAddress: server.requestIP(req)?.address },
+            url: url.pathname + url.search,
+            method: req.method,
+            on(event: string, callback: (...args: unknown[]) => void) {
+              if (event === "data") {
+                if (bodyBuffer.length > 0) callback(bodyBuffer);
+              } else if (event === "end") {
+                callback();
+              }
+              return this;
+            },
+          } as unknown as IncomingMessage;
+
+          // 构造高度逼真的 Node.js 模拟响应对象
+          const pseudoRes = {
+            statusCode: 200,
+            headersSent: false,
+            _headers: new Headers(),
+            setHeader(name: string, value: string | string[]) {
+              if (Array.isArray(value)) {
+                this._headers.delete(name);
+                value.forEach((v) => this._headers.append(name, v));
+              } else {
+                this._headers.set(name, value);
+              }
+            },
+            writeHead(code: number, hdrs?: Record<string, string | string[]>) {
+              this.statusCode = code;
+              if (hdrs) Object.entries(hdrs).forEach(([k, v]) => this.setHeader(k, v));
+            },
+            end(data?: unknown) {
+              if (hasResolved) return;
+              hasResolved = true;
+              this.headersSent = true;
+              resolve(
+                new Response(data as BodyInit | null | undefined, {
+                  status: this.statusCode,
+                  headers: this._headers,
+                }),
+              );
+            },
+          } as unknown as ServerResponse;
+
+          try {
+            const configSnapshot = loadConfig();
+            const trustedProxies = configSnapshot.gateway?.trustedProxies ?? [];
+            const requestPath = url.pathname;
+
+            if (await handleHooksRequest(pseudoReq, pseudoRes)) return;
+            if (
+              await handleToolsInvokeHttpRequest(pseudoReq, pseudoRes, {
+                auth: resolvedAuth,
+                trustedProxies,
+                rateLimiter,
+              })
+            )
+              return;
+            if (await handleSlackHttpRequest(pseudoReq, pseudoRes)) return;
+
+            // 🔥 鉴权与插件 🔥
+            if (handlePluginRequest) {
+              // Channel HTTP endpoints are gateway-auth protected by default.
+              // Non-channel plugin routes remain plugin-owned and must enforce
+              // their own auth when exposing sensitive functionality.
+              if (requestPath.startsWith("/api/channels/")) {
+                const token = getBearerToken(pseudoReq);
+                const authResult = await authorizeGatewayConnect({
+                  auth: resolvedAuth,
+                  connectAuth: token ? { token, password: token } : null,
+                  req: pseudoReq,
+                  trustedProxies,
+                  rateLimiter,
+                });
+                if (!authResult.ok) {
+                  // 内部会调用 pseudoRes.end()，从而 resolve Promise
+                  sendGatewayAuthFailure(pseudoRes, authResult);
+                  return;
+                }
+              }
+              if (await handlePluginRequest(pseudoReq, pseudoRes)) {
+                return;
+              }
+            }
+
+            if (openResponsesEnabled) {
+              if (
+                await handleOpenResponsesHttpRequest(pseudoReq, pseudoRes, {
+                  auth: resolvedAuth,
+                  config: openResponsesConfig,
+                  trustedProxies,
+                  rateLimiter,
+                })
+              )
+                return;
+            }
+
+            if (openAiChatCompletionsEnabled) {
+              if (
+                await handleOpenAiHttpRequest(pseudoReq, pseudoRes, {
+                  auth: resolvedAuth,
+                  trustedProxies,
+                  rateLimiter,
+                })
+              )
+                return;
+            }
+
+            if (canvasHost) {
+              if (isCanvasPath(requestPath)) {
+                const ok = await authorizeCanvasRequest({
+                  req: pseudoReq,
+                  auth: resolvedAuth,
+                  trustedProxies,
+                  clients,
+                  rateLimiter,
+                });
+                if (!ok.ok) {
+                  sendGatewayAuthFailure(pseudoRes, ok);
+                  return;
+                }
+              }
+
+              if (await handleA2uiHttpRequest(pseudoReq, pseudoRes)) return;
+              if (await canvasHost.handleHttpRequest(pseudoReq, pseudoRes)) return;
+            }
+
+            if (controlUiEnabled) {
+              if (
+                handleControlUiAvatarRequest(pseudoReq, pseudoRes, {
+                  basePath: controlUiBasePath,
+                  resolveAvatar: (agentId) => resolveAgentAvatar(configSnapshot, agentId),
+                })
+              )
+                return;
+              if (
+                handleControlUiHttpRequest(pseudoReq, pseudoRes, {
+                  basePath: controlUiBasePath,
+                  config: configSnapshot,
+                  root: controlUiRoot,
+                })
+              )
+                return;
+            }
+
+            if (!hasResolved) {
+              pseudoRes.statusCode = 404;
+              pseudoRes.end("Not Found");
+            }
+          } catch {
+            if (!hasResolved) {
+              pseudoRes.statusCode = 500;
+              pseudoRes.end("Internal Server Error");
+            }
+          }
+        })(); // <--- 结束自执行 async 函数
       });
+    },
 
-  async function handleRequest(req: IncomingMessage, res: ServerResponse) {
-    setDefaultSecurityHeaders(res);
-
-    // Don't interfere with WebSocket upgrades; ws handles the 'upgrade' event.
-    if (String(req.headers.upgrade ?? "").toLowerCase() === "websocket") {
-      return;
-    }
-
-    try {
-      const configSnapshot = loadConfig();
-      const trustedProxies = configSnapshot.gateway?.trustedProxies ?? [];
-      const requestPath = new URL(req.url ?? "/", "http://localhost").pathname;
-      if (await handleHooksRequest(req, res)) {
-        return;
-      }
-      if (
-        await handleToolsInvokeHttpRequest(req, res, {
-          auth: resolvedAuth,
-          trustedProxies,
-          rateLimiter,
-        })
-      ) {
-        return;
-      }
-      if (await handleSlackHttpRequest(req, res)) {
-        return;
-      }
-      if (handlePluginRequest) {
-        // Channel HTTP endpoints are gateway-auth protected by default.
-        // Non-channel plugin routes remain plugin-owned and must enforce
-        // their own auth when exposing sensitive functionality.
-        if (requestPath.startsWith("/api/channels/")) {
-          const token = getBearerToken(req);
-          const authResult = await authorizeGatewayConnect({
-            auth: resolvedAuth,
-            connectAuth: token ? { token, password: token } : null,
-            req,
-            trustedProxies,
-            rateLimiter,
-          });
-          if (!authResult.ok) {
-            sendGatewayAuthFailure(res, authResult);
-            return;
-          }
-        }
-        if (await handlePluginRequest(req, res)) {
-          return;
-        }
-      }
-      if (openResponsesEnabled) {
-        if (
-          await handleOpenResponsesHttpRequest(req, res, {
-            auth: resolvedAuth,
-            config: openResponsesConfig,
-            trustedProxies,
-            rateLimiter,
-          })
-        ) {
-          return;
-        }
-      }
-      if (openAiChatCompletionsEnabled) {
-        if (
-          await handleOpenAiHttpRequest(req, res, {
-            auth: resolvedAuth,
-            trustedProxies,
-            rateLimiter,
-          })
-        ) {
-          return;
-        }
-      }
-      if (canvasHost) {
-        if (isCanvasPath(requestPath)) {
-          const ok = await authorizeCanvasRequest({
-            req,
-            auth: resolvedAuth,
-            trustedProxies,
-            clients,
-            rateLimiter,
-          });
-          if (!ok.ok) {
-            sendGatewayAuthFailure(res, ok);
-            return;
-          }
-        }
-        if (await handleA2uiHttpRequest(req, res)) {
-          return;
-        }
-        if (await canvasHost.handleHttpRequest(req, res)) {
-          return;
-        }
-      }
-      if (controlUiEnabled) {
-        if (
-          handleControlUiAvatarRequest(req, res, {
-            basePath: controlUiBasePath,
-            resolveAvatar: (agentId) => resolveAgentAvatar(configSnapshot, agentId),
-          })
-        ) {
-          return;
-        }
-        if (
-          handleControlUiHttpRequest(req, res, {
-            basePath: controlUiBasePath,
-            config: configSnapshot,
-            root: controlUiRoot,
-          })
-        ) {
-          return;
-        }
-      }
-
-      res.statusCode = 404;
-      res.setHeader("Content-Type", "text/plain; charset=utf-8");
-      res.end("Not Found");
-    } catch {
-      res.statusCode = 500;
-      res.setHeader("Content-Type", "text/plain; charset=utf-8");
-      res.end("Internal Server Error");
-    }
-  }
-
-  return httpServer;
-}
-
-export function attachGatewayUpgradeHandler(opts: {
-  httpServer: HttpServer;
-  wss: WebSocketServer;
-  canvasHost: CanvasHostHandler | null;
-  clients: Set<GatewayWsClient>;
-  resolvedAuth: ResolvedGatewayAuth;
-  /** Optional rate limiter for auth brute-force protection. */
-  rateLimiter?: AuthRateLimiter;
-}) {
-  const { httpServer, wss, canvasHost, clients, resolvedAuth, rateLimiter } = opts;
-  httpServer.on("upgrade", (req, socket, head) => {
-    void (async () => {
-      if (canvasHost) {
-        const url = new URL(req.url ?? "/", "http://localhost");
-        if (url.pathname === CANVAS_WS_PATH) {
-          const configSnapshot = loadConfig();
-          const trustedProxies = configSnapshot.gateway?.trustedProxies ?? [];
-          const ok = await authorizeCanvasRequest({
-            req,
-            auth: resolvedAuth,
-            trustedProxies,
-            clients,
-            rateLimiter,
-          });
-          if (!ok.ok) {
-            writeUpgradeAuthFailure(socket, ok);
-            socket.destroy();
-            return;
-          }
-        }
-        if (canvasHost.handleUpgrade(req, socket, head)) {
-          return;
-        }
-      }
-      wss.handleUpgrade(req, socket, head, (ws) => {
-        wss.emit("connection", ws, req);
-      });
-    })().catch(() => {
-      socket.destroy();
-    });
-  });
+    websocket: {
+      open(ws: ServerWebSocket<unknown>) {
+        const data = ws.data as { isCanvas?: boolean } | undefined;
+        if (data?.isCanvas) canvasHost?.addClient(ws);
+        else wss.handleOpen(ws);
+      },
+      message(ws: ServerWebSocket<unknown>, message: string | Buffer) {
+        const data = ws.data as { isCanvas?: boolean } | undefined;
+        if (!data?.isCanvas) wss.handleMessage(ws, message);
+      },
+      close(ws: ServerWebSocket<unknown>, code: number, reason: string) {
+        const data = ws.data as { isCanvas?: boolean } | undefined;
+        if (data?.isCanvas) canvasHost?.removeClient(ws);
+        else wss.handleClose(ws, code, reason);
+      },
+    },
+  };
 }
