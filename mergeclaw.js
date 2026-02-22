@@ -9,8 +9,9 @@ import { join, extname } from "node:path";
  * 功能：
  * 1. 自动获取上游 (OpenClaw) 最新版本。
  * 2. 模拟合并以检测冲突并生成 Markdown 报告。
- * 3. 使用 -X ours 策略自动完成合并，避免手动处理冲突。
- * 4. 自动修正品牌命名空间与依赖路径。
+ * 3. 过滤预期内的 package.json 自动修复冲突，提取实质性冲突。
+ * 4. 使用 -X ours 策略自动完成合并，避免手动处理冲突。
+ * 5. 自动修正品牌命名空间与依赖路径。
  */
 
 // --- 颜色配置 ---
@@ -70,7 +71,7 @@ async function runSync() {
           console.log(`${GREEN}  [自动合并] ${RESET}${line.replace("Auto-merging ", "")}`);
         } else if (line.startsWith("CONFLICT")) {
           console.log(
-            `${RED}${BOLD}  [严重冲突] ${RESET}${RED}${line.replace("CONFLICT ", "")}${RESET}`,
+            `${RED}${BOLD}  [需处理冲突] ${RESET}${RED}${line.replace("CONFLICT ", "")}${RESET}`,
           );
         } else if (line.includes("Automatic merge failed")) {
           console.log(`\n${RED}${BOLD}  ❌ ${line}${RESET}`);
@@ -128,18 +129,55 @@ async function runSync() {
 }
 
 /**
+ * 判断 package.json 冲突块是否仅包含脚本会自动修复的字段
+ * (name, version, description, moltbot, devDependencies, peerDependencies 等)
+ */
+function isIgnorablePackageJsonConflict(localPart, upstreamPart) {
+  const isIgnorableLine = (line) => {
+    // 剥离本地修改特有的 "  行号 | " 前缀，保留纯净文本
+    const cleanLine = line.replace(/^\s*\d+\s*\|\s*/, "").trim();
+    if (!cleanLine) return true; // 忽略空行
+
+    // 匹配通常自动修改的字段名
+    if (
+      /^"?(name|version|description|openclaw|moltbot|devDependencies|peerDependencies)"?\s*:/.test(
+        cleanLine,
+      )
+    ) {
+      return true;
+    }
+
+    // 匹配在依赖块内部自动替换的包名 (如 "moltbot": "file:../../")
+    if (/^"?(openclaw|moltbot)"?\s*:/.test(cleanLine)) {
+      return true;
+    }
+
+    // 匹配仅包含括号、逗号等语法的行
+    if (/^[{}[\],]+$/.test(cleanLine)) {
+      return true;
+    }
+
+    // 出现无法自动处理的业务字段/依赖，不能忽略
+    return false;
+  };
+
+  // 只有当本地和上游的修改行全部都符合“可忽略”条件时，才返回 true
+  return localPart.every(isIgnorableLine) && upstreamPart.every(isIgnorableLine);
+}
+
+/**
  * 生成冲突报告
  * 采用“模拟合并-提取-撤销”策略，兼容不同 Git 版本
  */
 async function generateConflictReport(version) {
-  let R;
+  let logFilePath;
   try {
     const syncDir = join(process.cwd(), "sync");
     if (!existsSync(syncDir)) mkdirSync(syncDir, { recursive: true });
 
     // --- 自动计算文件名 (如 2026.2.18-2.md) ---
     let logFileName = `${version}.md`;
-    let logFilePath = join(syncDir, logFileName);
+    logFilePath = join(syncDir, logFileName);
     let counter = 1;
     while (existsSync(logFilePath)) {
       counter++;
@@ -147,10 +185,9 @@ async function generateConflictReport(version) {
       logFilePath = join(syncDir, logFileName);
     }
 
-    R = logFilePath;
-
     let conflictFiles = [];
-    console.log(`${YELLOW}🔍 正在检测冲突...${RESET}`);
+    console.log(`${YELLOW}🔍 正在检测冲突并过滤自动修复项...${RESET}`);
+
     // --- 1. 模拟合并以获取冲突列表 ---
     try {
       // 使用 --no-commit --no-ff 执行一次标准合并（不带 -X ours）
@@ -167,13 +204,18 @@ async function generateConflictReport(version) {
         // --- 2. 提取冲突内容并写入 Markdown ---
         let mdContent = `# ⚠️ 冲突报告 (已被 -X ours 自动覆盖) - ${version}\n\n`;
         mdContent += `> 自动同步时间: ${new Date().toLocaleString()}\n`;
-        mdContent += `> **注意**：以下内容在合并中已按本地优先处理。若需上游逻辑，请手动参考下方代码块。\n\n`;
+        mdContent += `> **注意**：以下内容在合并中已按本地优先处理。若需上游逻辑，请手动参考下方代码块。\n`;
+        mdContent += `> *(注：已自动过滤 package.json 中 name、version 等自动修复项)*\n\n`;
+
+        let totalReportableFiles = 0;
 
         for (const file of conflictFiles) {
           const fileName = String(file);
           if (!existsSync(fileName)) continue;
 
-          mdContent += `### 文件: \`${fileName}\`\n\n`;
+          let fileMdContent = `### 文件: \`${fileName}\`\n\n`;
+          let hasReportableBlocks = false;
+          const isPackageJson = fileName.endsWith("package.json");
 
           try {
             const fileContent = readFileSync(fileName, "utf8");
@@ -203,31 +245,52 @@ async function generateConflictReport(version) {
                   }
                   i++;
                 }
+
+                // 🌟 核心拦截点：如果是 package.json，且只包含可自动修复的冲突，则直接跳过！
+                if (isPackageJson && isIgnorablePackageJsonConflict(localPart, upstreamPart)) {
+                  i++;
+                  continue;
+                }
+
+                hasReportableBlocks = true;
                 const ext = extname(fileName).slice(1) || "text";
                 const lang =
                   ext === "ts" || ext === "tsx" ? "typescript" : ext === "js" ? "javascript" : ext;
 
-                mdContent += `#### 冲突块 #${blockIndex++}\n`;
-                mdContent += `\`\`\`${lang}\n`;
-                mdContent += `<<<<<<< 本地修改 (起始行: ${startLine})\n`;
-                mdContent += localPart.join("\n") + "\n";
-                mdContent += `=======\n`;
-                mdContent += upstreamPart.join("\n") + "\n";
-                mdContent += `>>>>>>>\n`;
-                mdContent += `\`\`\`\n`; // 去掉这里原本多余的 \n
+                fileMdContent += `#### 冲突块 #${blockIndex++}\n`;
+                fileMdContent += `\`\`\`${lang}\n`;
+                fileMdContent += `<<<<<<< 本地修改 (起始行: ${startLine})\n`;
+                fileMdContent += localPart.join("\n") + "\n";
+                fileMdContent += `=======\n`;
+                fileMdContent += upstreamPart.join("\n") + "\n";
+                fileMdContent += `>>>>>>>\n`;
+                fileMdContent += `\`\`\`\n`;
               }
               i++;
             }
           } catch (e) {
-            mdContent += `*无法读取冲突详情: ${e.message}*\n\n`;
+            fileMdContent += `*无法读取冲突详情: ${e.message}*\n\n`;
+            hasReportableBlocks = true;
           }
-          mdContent += `---\n\n`;
+
+          if (hasReportableBlocks) {
+            mdContent += fileMdContent + `---\n\n`;
+            totalReportableFiles++;
+          }
         }
 
-        writeFileSync(logFilePath, mdContent);
-        console.log(
-          `${GREEN}✔ 已检测到 ${conflictFiles.length} 个冲突文件，报告已生成: ${logFilePath}${RESET}`,
-        );
+        if (totalReportableFiles === 0) {
+          writeFileSync(
+            logFilePath,
+            `# Sync Report - ${version}\n\n✅ 本次合并仅包含 package.json 的自动修复项冲突，无实质性代码冲突。`,
+          );
+          console.log(`${GREEN}✔ 已过滤自动修复项，本次合并无实质性代码冲突！${RESET}`);
+        } else {
+          writeFileSync(logFilePath, mdContent);
+          console.log(
+            `${GREEN}✔ 已检测到 ${totalReportableFiles} 个实质性冲突文件，报告已生成: ${logFilePath}${RESET}`,
+          );
+        }
       }
     } finally {
       // --- 3. 清理现场，准备执行真正的 -X ours 合并 ---
@@ -237,7 +300,7 @@ async function generateConflictReport(version) {
     console.error(`  ${RED}✘ 冲突报告失败 ${version}: ${e.message}${RESET}`);
   }
 
-  return R;
+  return logFilePath;
 }
 
 async function handlePackageJsonConflict(filePath) {
