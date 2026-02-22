@@ -1,11 +1,10 @@
 {
   "name": "@moltbot/tlon",
-  "version": "2026.2.18",
+  "version": "2026.2.22",
   "description": "Moltbot Tlon/Urbit channel plugin",
   "type": "module",
   "dependencies": {
-    "@urbit/aura": "^3.0.0",
-    "@urbit/http-api": "^3.0.0"
+    "@urbit/aura": "^3.0.0"
   },
   "devDependencies": {
     "moltbot": "file:../../"
@@ -27,7 +26,7 @@
     "install": {
       "npmSpec": "@moltbot/tlon",
       "localPath": "extensions/tlon",
-      "defaultChoice": "npm"
+      "defaultChoice": "bun"
     }
   }
 }

@@ -71,6 +71,10 @@ async function runSync() {
         if (line.includes("pnpm-lock.yaml")) {
           continue;
         }
+        // 🌟 屏蔽根目录 package.json 的冲突日志 (因为我们要手工处理)
+        if (line.includes("package.json") && !line.includes("extensions")) {
+          continue;
+        }
 
         if (line.startsWith("Auto-merging")) {
           console.log(`${GREEN}  [自动合并] ${RESET}${line.replace("Auto-merging ", "")}`);
@@ -123,10 +127,11 @@ async function runSync() {
   console.log(`\n${BOLD}${GREEN}✅ 同步与自动化修复已完成！${RESET}`);
   console.log(`${YELLOW}📝 剩余操作：${RESET}`);
   console.log(`   1. 查看冲突报告: ${BOLD}${finalLogPath}${RESET}`);
+  console.log(`   2. 手工比对并修复根目录的 package.json 文件`);
   console.log(
-    `   2. 确认无误后运行: ${BOLD}git commit -m "chore: sync to version ${upstreamVersion}"${RESET}`,
+    `   3. 确认无误后运行: ${BOLD}git commit -m "chore: sync to version ${upstreamVersion}"${RESET}`,
   );
-  console.log(`   3. 上传代码 ${BOLD}git push${RESET}`);
+  console.log(`   4. 上传代码 ${BOLD}git push${RESET}`);
   // 自动在编辑器中打开报告
   if (finalLogPath && existsSync(finalLogPath)) {
     await $`code ${finalLogPath}`.quiet().nothrow();
@@ -183,6 +188,9 @@ async function generateConflictReport(version) {
 
           // 忽略 pnpm-lock.yaml 写入冲突报告
           if (fileName === "pnpm-lock.yaml") continue;
+
+          // 🌟 忽略根目录的 package.json 写入冲突报告（交由开发者手工处理）
+          if (fileName === "package.json") continue;
 
           let fileMdContent = `### 文件: \`${fileName}\`\n\n`;
           let hasReportableBlocks = false;

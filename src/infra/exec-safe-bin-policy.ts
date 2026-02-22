@@ -1,3 +1,5 @@
+import { parseExecArgvToken } from "./exec-approvals-analysis.js";
+
 function isPathLikeToken(value: string): boolean {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -24,22 +26,50 @@ function hasGlobToken(value: string): boolean {
 export type SafeBinProfile = {
   minPositional?: number;
   maxPositional?: number;
-  valueFlags?: ReadonlySet<string>;
-  blockedFlags?: ReadonlySet<string>;
+  allowedValueFlags?: ReadonlySet<string>;
+  deniedFlags?: ReadonlySet<string>;
 };
 
-const NO_FLAGS = new Set<string>();
-const asFlagSet = (flags: string[]): ReadonlySet<string> => new Set(flags);
+export type SafeBinProfileFixture = {
+  minPositional?: number;
+  maxPositional?: number;
+  allowedValueFlags?: readonly string[];
+  deniedFlags?: readonly string[];
+};
 
-export const SAFE_BIN_GENERIC_PROFILE: SafeBinProfile = {};
+const NO_FLAGS: ReadonlySet<string> = new Set();
 
-export const SAFE_BIN_PROFILES: Record<string, SafeBinProfile> = {
+const toFlagSet = (flags?: readonly string[]): ReadonlySet<string> => {
+  if (!flags || flags.length === 0) {
+    return NO_FLAGS;
+  }
+  return new Set(flags);
+};
+
+function compileSafeBinProfile(fixture: SafeBinProfileFixture): SafeBinProfile {
+  return {
+    minPositional: fixture.minPositional,
+    maxPositional: fixture.maxPositional,
+    allowedValueFlags: toFlagSet(fixture.allowedValueFlags),
+    deniedFlags: toFlagSet(fixture.deniedFlags),
+  };
+}
+
+function compileSafeBinProfiles(
+  fixtures: Record<string, SafeBinProfileFixture>,
+): Record<string, SafeBinProfile> {
+  return Object.fromEntries(
+    Object.entries(fixtures).map(([name, fixture]) => [name, compileSafeBinProfile(fixture)]),
+  ) as Record<string, SafeBinProfile>;
+}
+
+export const SAFE_BIN_GENERIC_PROFILE_FIXTURE: SafeBinProfileFixture = {};
+
+export const SAFE_BIN_PROFILE_FIXTURES: Record<string, SafeBinProfileFixture> = {
   jq: {
     maxPositional: 1,
-    valueFlags: asFlagSet([
-      "--arg",
-      "--argjson",
-      "--argstr",
+    allowedValueFlags: ["--arg", "--argjson", "--argstr"],
+    deniedFlags: [
       "--argfile",
       "--rawfile",
       "--slurpfile",
@@ -47,43 +77,32 @@ export const SAFE_BIN_PROFILES: Record<string, SafeBinProfile> = {
       "--library-path",
       "-L",
       "-f",
-    ]),
-    blockedFlags: asFlagSet([
-      "--argfile",
-      "--rawfile",
-      "--slurpfile",
-      "--from-file",
-      "--library-path",
-      "-L",
-      "-f",
-    ]),
+    ],
   },
   grep: {
-    maxPositional: 1,
-    valueFlags: asFlagSet([
+    // Keep grep stdin-only: pattern must come from -e/--regexp.
+    // Allowing one positional is ambiguous because -e consumes the pattern and
+    // frees the positional slot for a filename.
+    maxPositional: 0,
+    allowedValueFlags: [
       "--regexp",
-      "--file",
       "--max-count",
       "--after-context",
       "--before-context",
       "--context",
       "--devices",
-      "--directories",
       "--binary-files",
       "--exclude",
-      "--exclude-from",
       "--include",
       "--label",
       "-e",
-      "-f",
       "-m",
       "-A",
       "-B",
       "-C",
       "-D",
-      "-d",
-    ]),
-    blockedFlags: asFlagSet([
+    ],
+    deniedFlags: [
       "--file",
       "--exclude-from",
       "--dereference-recursive",
@@ -93,11 +112,11 @@ export const SAFE_BIN_PROFILES: Record<string, SafeBinProfile> = {
       "-d",
       "-r",
       "-R",
-    ]),
+    ],
   },
   cut: {
     maxPositional: 0,
-    valueFlags: asFlagSet([
+    allowedValueFlags: [
       "--bytes",
       "--characters",
       "--fields",
@@ -107,32 +126,29 @@ export const SAFE_BIN_PROFILES: Record<string, SafeBinProfile> = {
       "-c",
       "-f",
       "-d",
-    ]),
+    ],
   },
   sort: {
     maxPositional: 0,
-    valueFlags: asFlagSet([
+    allowedValueFlags: [
       "--key",
       "--field-separator",
       "--buffer-size",
       "--temporary-directory",
-      "--compress-program",
       "--parallel",
       "--batch-size",
       "--random-source",
-      "--files0-from",
-      "--output",
       "-k",
       "-t",
       "-S",
       "-T",
-      "-o",
-    ]),
-    blockedFlags: asFlagSet(["--files0-from", "--output", "-o"]),
+    ],
+    // --compress-program can invoke an external executable and breaks stdin-only guarantees.
+    deniedFlags: ["--compress-program", "--files0-from", "--output", "-o"],
   },
   uniq: {
     maxPositional: 0,
-    valueFlags: asFlagSet([
+    allowedValueFlags: [
       "--skip-fields",
       "--skip-chars",
       "--check-chars",
@@ -140,15 +156,15 @@ export const SAFE_BIN_PROFILES: Record<string, SafeBinProfile> = {
       "-f",
       "-s",
       "-w",
-    ]),
+    ],
   },
   head: {
     maxPositional: 0,
-    valueFlags: asFlagSet(["--lines", "--bytes", "-n", "-c"]),
+    allowedValueFlags: ["--lines", "--bytes", "-n", "-c"],
   },
   tail: {
     maxPositional: 0,
-    valueFlags: asFlagSet([
+    allowedValueFlags: [
       "--lines",
       "--bytes",
       "--sleep-interval",
@@ -156,7 +172,7 @@ export const SAFE_BIN_PROFILES: Record<string, SafeBinProfile> = {
       "--pid",
       "-n",
       "-c",
-    ]),
+    ],
   },
   tr: {
     minPositional: 1,
@@ -164,10 +180,37 @@ export const SAFE_BIN_PROFILES: Record<string, SafeBinProfile> = {
   },
   wc: {
     maxPositional: 0,
-    valueFlags: asFlagSet(["--files0-from"]),
-    blockedFlags: asFlagSet(["--files0-from"]),
+    deniedFlags: ["--files0-from"],
   },
 };
+
+export const SAFE_BIN_GENERIC_PROFILE = compileSafeBinProfile(SAFE_BIN_GENERIC_PROFILE_FIXTURE);
+
+export const SAFE_BIN_PROFILES: Record<string, SafeBinProfile> =
+  compileSafeBinProfiles(SAFE_BIN_PROFILE_FIXTURES);
+
+export function resolveSafeBinDeniedFlags(
+  fixtures: Readonly<Record<string, SafeBinProfileFixture>> = SAFE_BIN_PROFILE_FIXTURES,
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [name, fixture] of Object.entries(fixtures)) {
+    const denied = Array.from(new Set(fixture.deniedFlags ?? [])).toSorted();
+    if (denied.length > 0) {
+      out[name] = denied;
+    }
+  }
+  return out;
+}
+
+export function renderSafeBinDeniedFlagsDocBullets(
+  fixtures: Readonly<Record<string, SafeBinProfileFixture>> = SAFE_BIN_PROFILE_FIXTURES,
+): string {
+  const deniedByBin = resolveSafeBinDeniedFlags(fixtures);
+  const bins = Object.keys(deniedByBin).toSorted();
+  return bins
+    .map((bin) => `- \`${bin}\`: ${deniedByBin[bin].map((flag) => `\`${flag}\``).join(", ")}`)
+    .join("\n");
+}
 
 function isSafeLiteralToken(value: string): boolean {
   if (!value || value === "-") {
@@ -180,55 +223,50 @@ function isInvalidValueToken(value: string | undefined): boolean {
   return !value || !isSafeLiteralToken(value);
 }
 
-function consumeLongFlagToken(
+function consumeLongOptionToken(
   args: string[],
   index: number,
-  valueFlags: ReadonlySet<string>,
-  blockedFlags: ReadonlySet<string>,
+  flag: string,
+  inlineValue: string | undefined,
+  allowedValueFlags: ReadonlySet<string>,
+  deniedFlags: ReadonlySet<string>,
 ): number {
-  const token = args[index];
-  if (!token) {
+  if (deniedFlags.has(flag)) {
     return -1;
   }
-  const eqIndex = token.indexOf("=");
-  const flag = eqIndex > 0 ? token.slice(0, eqIndex) : token;
-  if (blockedFlags.has(flag)) {
-    return -1;
+  if (inlineValue !== undefined) {
+    return isSafeLiteralToken(inlineValue) ? index + 1 : -1;
   }
-  if (eqIndex > 0) {
-    return isSafeLiteralToken(token.slice(eqIndex + 1)) ? index + 1 : -1;
-  }
-  if (!valueFlags.has(flag)) {
+  if (!allowedValueFlags.has(flag)) {
     return index + 1;
   }
   return isInvalidValueToken(args[index + 1]) ? -1 : index + 2;
 }
 
-function consumeShortFlagClusterToken(
+function consumeShortOptionClusterToken(
   args: string[],
   index: number,
-  valueFlags: ReadonlySet<string>,
-  blockedFlags: ReadonlySet<string>,
+  raw: string,
+  cluster: string,
+  flags: string[],
+  allowedValueFlags: ReadonlySet<string>,
+  deniedFlags: ReadonlySet<string>,
 ): number {
-  const token = args[index];
-  if (!token) {
-    return -1;
-  }
-  for (let j = 1; j < token.length; j += 1) {
-    const flag = `-${token[j]}`;
-    if (blockedFlags.has(flag)) {
+  for (let j = 0; j < flags.length; j += 1) {
+    const flag = flags[j];
+    if (deniedFlags.has(flag)) {
       return -1;
     }
-    if (!valueFlags.has(flag)) {
+    if (!allowedValueFlags.has(flag)) {
       continue;
     }
-    const inlineValue = token.slice(j + 1);
+    const inlineValue = cluster.slice(j + 1);
     if (inlineValue) {
       return isSafeLiteralToken(inlineValue) ? index + 1 : -1;
     }
     return isInvalidValueToken(args[index + 1]) ? -1 : index + 2;
   }
-  return hasGlobToken(token) ? -1 : index + 1;
+  return hasGlobToken(raw) ? -1 : index + 1;
 }
 
 function consumePositionalToken(token: string, positional: string[]): boolean {
@@ -248,17 +286,20 @@ function validatePositionalCount(positional: string[], profile: SafeBinProfile):
 }
 
 export function validateSafeBinArgv(args: string[], profile: SafeBinProfile): boolean {
-  const valueFlags = profile.valueFlags ?? NO_FLAGS;
-  const blockedFlags = profile.blockedFlags ?? NO_FLAGS;
+  const allowedValueFlags = profile.allowedValueFlags ?? NO_FLAGS;
+  const deniedFlags = profile.deniedFlags ?? NO_FLAGS;
   const positional: string[] = [];
   let i = 0;
   while (i < args.length) {
-    const token = args[i];
-    if (!token) {
+    const rawToken = args[i] ?? "";
+    const token = parseExecArgvToken(rawToken);
+
+    if (token.kind === "empty" || token.kind === "stdin") {
       i += 1;
       continue;
     }
-    if (token === "--") {
+
+    if (token.kind === "terminator") {
       for (let j = i + 1; j < args.length; j += 1) {
         const rest = args[j];
         if (!rest || rest === "-") {
@@ -270,20 +311,24 @@ export function validateSafeBinArgv(args: string[], profile: SafeBinProfile): bo
       }
       break;
     }
-    if (token === "-") {
-      i += 1;
-      continue;
-    }
-    if (!token.startsWith("-")) {
-      if (!consumePositionalToken(token, positional)) {
+
+    if (token.kind === "positional") {
+      if (!consumePositionalToken(token.raw, positional)) {
         return false;
       }
       i += 1;
       continue;
     }
 
-    if (token.startsWith("--")) {
-      const nextIndex = consumeLongFlagToken(args, i, valueFlags, blockedFlags);
+    if (token.style === "long") {
+      const nextIndex = consumeLongOptionToken(
+        args,
+        i,
+        token.flag,
+        token.inlineValue,
+        allowedValueFlags,
+        deniedFlags,
+      );
       if (nextIndex < 0) {
         return false;
       }
@@ -291,7 +336,15 @@ export function validateSafeBinArgv(args: string[], profile: SafeBinProfile): bo
       continue;
     }
 
-    const nextIndex = consumeShortFlagClusterToken(args, i, valueFlags, blockedFlags);
+    const nextIndex = consumeShortOptionClusterToken(
+      args,
+      i,
+      token.raw,
+      token.cluster,
+      token.flags,
+      allowedValueFlags,
+      deniedFlags,
+    );
     if (nextIndex < 0) {
       return false;
     }

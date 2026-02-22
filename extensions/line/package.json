@@ -1,6 +1,6 @@
 {
   "name": "@moltbot/line",
-  "version": "2026.2.18",
+  "version": "2026.2.22",
   "private": true,
   "description": "Moltbot LINE channel plugin",
   "type": "module",
@@ -24,7 +24,7 @@
     "install": {
       "npmSpec": "@moltbot/line",
       "localPath": "extensions/line",
-      "defaultChoice": "npm"
+      "defaultChoice": "bun"
     }
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@moltbot/nextcloud-talk",
-  "version": "2026.2.18",
+  "version": "2026.2.22",
   "description": "Moltbot Nextcloud Talk channel plugin",
   "type": "module",
   "devDependencies": {
@@ -27,7 +27,7 @@
     "install": {
       "npmSpec": "@moltbot/nextcloud-talk",
       "localPath": "extensions/nextcloud-talk",
-      "defaultChoice": "npm"
+      "defaultChoice": "bun"
     }
   }
 }

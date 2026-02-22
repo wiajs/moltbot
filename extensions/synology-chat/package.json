@@ -1,0 +1,29 @@
+{
+  "name": "@moltbot/synology-chat",
+  "version": "2026.2.22",
+  "private": true,
+  "description": "Synology Chat channel plugin for Moltbot",
+  "type": "module",
+  "devDependencies": {
+    "moltbot": "file:../../"
+  },
+  "moltbot": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "channel": {
+      "id": "synology-chat",
+      "label": "Synology Chat",
+      "selectionLabel": "Synology Chat (Webhook)",
+      "docsPath": "/channels/synology-chat",
+      "docsLabel": "synology-chat",
+      "blurb": "Connect your Synology NAS Chat to OpenClaw with full agent capabilities.",
+      "order": 90
+    },
+    "install": {
+      "npmSpec": "@moltbot/synology-chat",
+      "localPath": "extensions/synology-chat",
+      "defaultChoice": "bun"
+    }
+  }
+}

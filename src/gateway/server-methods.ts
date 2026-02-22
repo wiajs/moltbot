@@ -1,19 +1,8 @@
 import { formatControlPlaneActor, resolveControlPlaneActor } from "./control-plane-audit.js";
 import { consumeControlPlaneWriteBudget } from "./control-plane-rate-limit.js";
-import {
-  ADMIN_SCOPE,
-  APPROVALS_SCOPE,
-  isAdminOnlyMethod,
-  isApprovalMethod,
-  isNodeRoleMethod,
-  isPairingMethod,
-  isReadMethod,
-  isWriteMethod,
-  PAIRING_SCOPE,
-  READ_SCOPE,
-  WRITE_SCOPE,
-} from "./method-scopes.js";
+import { ADMIN_SCOPE, authorizeOperatorScopesForMethod } from "./method-scopes.js";
 import { ErrorCodes, errorShape } from "./protocol/index.js";
+import { isRoleAuthorizedForMethod, parseGatewayRole } from "./role-policy.js";
 import { agentHandlers } from "./server-methods/agent.js";
 import { agentsHandlers } from "./server-methods/agents.js";
 import { browserHandlers } from "./server-methods/browser.js";
@@ -47,51 +36,29 @@ function authorizeGatewayMethod(method: string, client: GatewayRequestOptions["c
   if (!client?.connect) {
     return null;
   }
-  const role = client.connect.role ?? "operator";
+  if (method === "health") {
+    return null;
+  }
+  const roleRaw = client.connect.role ?? "operator";
+  const role = parseGatewayRole(roleRaw);
+  if (!role) {
+    return errorShape(ErrorCodes.INVALID_REQUEST, `unauthorized role: ${roleRaw}`);
+  }
   const scopes = client.connect.scopes ?? [];
-  if (isNodeRoleMethod(method)) {
-    if (role === "node") {
-      return null;
-    }
+  if (!isRoleAuthorizedForMethod(role, method)) {
     return errorShape(ErrorCodes.INVALID_REQUEST, `unauthorized role: ${role}`);
   }
   if (role === "node") {
-    return errorShape(ErrorCodes.INVALID_REQUEST, `unauthorized role: ${role}`);
-  }
-  if (role !== "operator") {
-    return errorShape(ErrorCodes.INVALID_REQUEST, `unauthorized role: ${role}`);
+    return null;
   }
   if (scopes.includes(ADMIN_SCOPE)) {
     return null;
   }
-  if (isApprovalMethod(method) && !scopes.includes(APPROVALS_SCOPE)) {
-    return errorShape(ErrorCodes.INVALID_REQUEST, "missing scope: operator.approvals");
+  const scopeAuth = authorizeOperatorScopesForMethod(method, scopes);
+  if (!scopeAuth.allowed) {
+    return errorShape(ErrorCodes.INVALID_REQUEST, `missing scope: ${scopeAuth.missingScope}`);
   }
-  if (isPairingMethod(method) && !scopes.includes(PAIRING_SCOPE)) {
-    return errorShape(ErrorCodes.INVALID_REQUEST, "missing scope: operator.pairing");
-  }
-  if (isReadMethod(method) && !(scopes.includes(READ_SCOPE) || scopes.includes(WRITE_SCOPE))) {
-    return errorShape(ErrorCodes.INVALID_REQUEST, "missing scope: operator.read");
-  }
-  if (isWriteMethod(method) && !scopes.includes(WRITE_SCOPE)) {
-    return errorShape(ErrorCodes.INVALID_REQUEST, "missing scope: operator.write");
-  }
-  if (isApprovalMethod(method)) {
-    return null;
-  }
-  if (isPairingMethod(method)) {
-    return null;
-  }
-  if (isReadMethod(method)) {
-    return null;
-  }
-  if (isWriteMethod(method)) {
-    return null;
-  }
-  if (isAdminOnlyMethod(method)) {
-    return errorShape(ErrorCodes.INVALID_REQUEST, "missing scope: operator.admin");
-  }
-  return errorShape(ErrorCodes.INVALID_REQUEST, "missing scope: operator.admin");
+  return null;
 }
 
 export const coreGatewayHandlers: GatewayRequestHandlers = {
