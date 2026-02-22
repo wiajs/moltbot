@@ -67,6 +67,11 @@ async function runSync() {
         if (!line.trim()) {
           continue;
         }
+        // 🌟 屏蔽 pnpm-lock.yaml 的冲突日志
+        if (line.includes("pnpm-lock.yaml")) {
+          continue;
+        }
+
         if (line.startsWith("Auto-merging")) {
           console.log(`${GREEN}  [自动合并] ${RESET}${line.replace("Auto-merging ", "")}`);
         } else if (line.startsWith("CONFLICT")) {
@@ -176,6 +181,9 @@ async function generateConflictReport(version) {
           const fileName = String(file);
           if (!existsSync(fileName)) continue;
 
+          // 忽略 pnpm-lock.yaml 写入冲突报告
+          if (fileName === "pnpm-lock.yaml") continue;
+
           let fileMdContent = `### 文件: \`${fileName}\`\n\n`;
           let hasReportableBlocks = false;
           const isPackageJson = fileName.endsWith("package.json");
@@ -199,11 +207,9 @@ async function generateConflictReport(version) {
                     mode = "upstream";
                   } else {
                     if (mode === "local") {
-                      // 为本地修改部分添加行号前缀
-                      const lineNum = i.toString().padStart(4, " ");
-                      localPart.push(`${lineNum} | ${lines[i]}`);
+                      localPart.push({ num: i, text: lines[i] });
                     } else {
-                      upstreamPart.push(lines[i]);
+                      upstreamPart.push({ num: i, text: lines[i] });
                     }
                   }
                   i++;
@@ -214,9 +220,9 @@ async function generateConflictReport(version) {
                   const isIgnorableLine = (lineText) => {
                     const clean = lineText.trim();
                     if (!clean) return true;
-                    // 过滤掉我们不关心的常规变动
+                    // 过滤掉我们不关心的常规变动，包含了 defaultChoice 和 npmSpec 等新字段
                     if (
-                      /^"?(name|version|private|description|type|openclaw|moltbot|devDependencies|peerDependencies)"?\s*:/.test(
+                      /^"?(name|version|private|description|type|openclaw|moltbot|devDependencies|peerDependencies|defaultChoice|npmSpec|localPath)"?\s*:/.test(
                         clean,
                       )
                     )
@@ -225,7 +231,7 @@ async function generateConflictReport(version) {
                     if (clean.includes('"file:../../"')) return true;
 
                     // 匹配仅包含括号、逗号等语法的行
-                    if (/^[{}[\],"\s]+$/.test(cleanLine.trim())) {
+                    if (/^[{}[\],"\s]+$/.test(clean)) {
                       return true;
                     }
 
@@ -253,10 +259,15 @@ async function generateConflictReport(version) {
                 fileMdContent += `#### 冲突块 #${blockIndex++}\n`;
                 fileMdContent += `\`\`\`${lang}\n`;
                 fileMdContent += `<<<<<<< 本地修改 (起始行: ${startLine})\n`;
-                fileMdContent += localPart.join("\n") + "\n";
+                localPart.forEach((l) => {
+                  const lineNum = l.num.toString().padStart(4, " ");
+                  fileMdContent += `${lineNum} | ${l.text}\n`;
+                });
                 fileMdContent += `=======\n`;
-                fileMdContent += upstreamPart.join("\n") + "\n";
-                fileMdContent += `>>>>>>>\n`;
+                upstreamPart.forEach((l) => {
+                  fileMdContent += `${l.text}\n`;
+                });
+                fileMdContent += `>>>>>>> 上游修改\n`;
                 fileMdContent += `\`\`\`\n`;
               }
               i++;
@@ -316,7 +327,7 @@ async function handlePackageJsonConflict(filePath) {
 
     // 🌟 修复依赖丢失 Bug：以上游最新配置(upstreamPkg)为基准，确保不错过任何新增的 dependencies
     const updatedPkg = {
-      ...cc, // ...localPkg,
+      ...upstreamPkg,
       // 1. 更新名称命名空间
       name: (upstreamPkg.name || localPkg.name || "").replace("@openclaw", "@moltbot"),
       // 2. 同步上游版本
@@ -342,9 +353,27 @@ async function handlePackageJsonConflict(filePath) {
     }
 
     // 5. 转换配置块名称 (openclaw -> moltbot)
-    if (upstreamPkg.openclaw) {
-      updatedPkg.moltbot = localPkg.moltbot || upstreamPkg.openclaw;
+    if (updatedPkg.openclaw) {
+      updatedPkg.moltbot = updatedPkg.openclaw;
       delete updatedPkg.openclaw;
+    }
+
+    // 🌟 替换安装默认包管理器为 bun
+    if (updatedPkg.moltbot && updatedPkg.moltbot.install) {
+      // 将 npmSpec 里的 openclaw 替换为 moltbot
+      if (updatedPkg.moltbot.install.npmSpec) {
+        updatedPkg.moltbot.install.npmSpec = updatedPkg.moltbot.install.npmSpec.replace(
+          "@openclaw",
+          "@moltbot",
+        );
+      }
+      // 强制将 defaultChoice 改为 bun
+      if (
+        updatedPkg.moltbot.install.defaultChoice === "npm" ||
+        updatedPkg.moltbot.install.defaultChoice === "pnpm"
+      ) {
+        updatedPkg.moltbot.install.defaultChoice = "bun";
+      }
     }
 
     // 写入文件并暂存
