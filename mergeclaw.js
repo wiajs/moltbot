@@ -129,43 +129,6 @@ async function runSync() {
 }
 
 /**
- * 判断 package.json 冲突块是否仅包含脚本会自动修复的字段
- * (name, version, description, moltbot, devDependencies, peerDependencies 等)
- */
-function isIgnorablePackageJsonConflict(localPart, upstreamPart) {
-  const isIgnorableLine = (line) => {
-    // 剥离本地修改特有的 "  行号 | " 前缀，保留纯净文本
-    const cleanLine = line.replace(/^\s*\d+\s*\|\s*/, "").trim();
-    if (!cleanLine) return true; // 忽略空行
-
-    // 匹配通常自动修改的字段名
-    if (
-      /^"?(name|version|description|openclaw|moltbot|devDependencies|peerDependencies)"?\s*:/.test(
-        cleanLine,
-      )
-    ) {
-      return true;
-    }
-
-    // 匹配在依赖块内部自动替换的包名 (如 "moltbot": "file:../../")
-    if (/^"?(openclaw|moltbot)"?\s*:/.test(cleanLine)) {
-      return true;
-    }
-
-    // 匹配仅包含括号、逗号等语法的行
-    if (/^[{}[\],]+$/.test(cleanLine)) {
-      return true;
-    }
-
-    // 出现无法自动处理的业务字段/依赖，不能忽略
-    return false;
-  };
-
-  // 只有当本地和上游的修改行全部都符合“可忽略”条件时，才返回 true
-  return localPart.every(isIgnorableLine) && upstreamPart.every(isIgnorableLine);
-}
-
-/**
  * 生成冲突报告
  * 采用“模拟合并-提取-撤销”策略，兼容不同 Git 版本
  */
@@ -246,10 +209,40 @@ async function generateConflictReport(version) {
                   i++;
                 }
 
-                // 🌟 核心拦截点：如果是 package.json，且只包含可自动修复的冲突，则直接跳过！
-                if (isPackageJson && isIgnorablePackageJsonConflict(localPart, upstreamPart)) {
-                  i++;
-                  continue;
+                // 🌟 行级别过滤：精准剔除噪音，只保留真正的冲突行
+                if (isPackageJson) {
+                  const isIgnorableLine = (lineText) => {
+                    const clean = lineText.trim();
+                    if (!clean) return true;
+                    // 过滤掉我们不关心的常规变动
+                    if (
+                      /^"?(name|version|private|description|type|openclaw|moltbot|devDependencies|peerDependencies)"?\s*:/.test(
+                        clean,
+                      )
+                    )
+                      return true;
+                    if (clean.includes('"@openclaw/') || clean.includes('"@moltbot/')) return true;
+                    if (clean.includes('"file:../../"')) return true;
+
+                    // 匹配仅包含括号、逗号等语法的行
+                    if (/^[{}[\],"\s]+$/.test(cleanLine.trim())) {
+                      return true;
+                    }
+
+                    return false;
+                  };
+
+                  localPart = localPart.filter((l) => !isIgnorableLine(l.text));
+                  upstreamPart = upstreamPart.filter((l) => !isIgnorableLine(l.text));
+
+                  // 如果过滤后两边剩下的内容一模一样，或者全空，则直接忽略该冲突块
+                  const localStr = localPart.map((l) => l.text.trim()).join("\n");
+                  const upstreamStr = upstreamPart.map((l) => l.text.trim()).join("\n");
+
+                  if (localStr === upstreamStr) {
+                    i++;
+                    continue;
+                  }
                 }
 
                 hasReportableBlocks = true;
@@ -321,35 +314,31 @@ async function handlePackageJsonConflict(filePath) {
       localPkg = { ...upstreamPkg };
     }
 
-    // --- 核心逻辑：更新 package.json 内容 ---
+    // 🌟 修复依赖丢失 Bug：以上游最新配置(upstreamPkg)为基准，确保不错过任何新增的 dependencies
     const updatedPkg = {
-      ...localPkg,
+      ...cc, // ...localPkg,
       // 1. 更新名称命名空间
-      name: (localPkg.name || upstreamPkg.name).replace("@openclaw", "@moltbot"),
+      name: (upstreamPkg.name || localPkg.name || "").replace("@openclaw", "@moltbot"),
       // 2. 同步上游版本
       version: upstreamPkg.version,
       // 3. 更新描述
-      description: (localPkg.description || upstreamPkg.description)?.replace(
-        /Open[Cc]law/g,
+      description: (upstreamPkg.description || localPkg.description || "")?.replace(
+        /Open[Cc]law/gi,
         "Moltbot",
       ),
     };
 
     // 4. 修正依赖：将 devDependencies 中的 openclaw 替换为 moltbot 并指向物理路径
-    if (updatedPkg.devDependencies) {
-      if (updatedPkg.devDependencies.openclaw) {
-        delete updatedPkg.devDependencies.openclaw;
-        updatedPkg.devDependencies.moltbot = "file:../../";
-      }
+    if (updatedPkg.devDependencies && updatedPkg.devDependencies.openclaw) {
+      delete updatedPkg.devDependencies.openclaw;
+      updatedPkg.devDependencies.moltbot = "file:../../";
     }
 
     // peerDependencies: openclaw -> moltbot (>=Version)
-    if (updatedPkg.peerDependencies) {
-      if (updatedPkg.peerDependencies.openclaw) {
-        delete updatedPkg.peerDependencies.openclaw;
-        // 自动设置为 >= 当前同步的版本号
-        updatedPkg.peerDependencies.moltbot = `>=${upstreamPkg.version}`;
-      }
+    if (updatedPkg.peerDependencies && updatedPkg.peerDependencies.openclaw) {
+      delete updatedPkg.peerDependencies.openclaw;
+      // 自动设置为 >= 当前同步的版本号
+      updatedPkg.peerDependencies.moltbot = `>=${upstreamPkg.version}`;
     }
 
     // 5. 转换配置块名称 (openclaw -> moltbot)
