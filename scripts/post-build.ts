@@ -9,6 +9,7 @@ await $`bun scripts/write-plugin-sdk-entry-dts.ts`;
 await Promise.all([
   $`bun scripts/canvas-a2ui-copy.ts`,
   $`bun scripts/copy-hook-metadata.ts`,
+  $`bun scripts/copy-export-html-templates.ts`,
   $`bun scripts/write-build-info.ts`,
   $`bun scripts/write-cli-compat.ts`,
 ]);

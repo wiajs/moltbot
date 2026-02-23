@@ -194,7 +194,10 @@ async function generateConflictReport(version) {
 
           let fileMdContent = `### 文件: \`${fileName}\`\n\n`;
           let hasReportableBlocks = false;
-          const isPackageJson = fileName.endsWith("package.json");
+
+          // 🌟 修改点 1：精准匹配，仅当文件路径以 extensions/ 开头且以 package.json 结尾时为 true
+          const isExtensionPackageJson =
+            fileName.startsWith("extensions/") && fileName.endsWith("package.json");
 
           try {
             const fileContent = readFileSync(fileName, "utf8");
@@ -223,19 +226,14 @@ async function generateConflictReport(version) {
                   i++;
                 }
 
-                // 🌟 行级别过滤：精准剔除噪音，只保留真正的冲突行
-                if (isPackageJson) {
+                // 🌟 修改点 2：应用新的严格判断变量进行行级别过滤
+                if (isExtensionPackageJson) {
                   const isIgnorableLine = (lineText) => {
                     const clean = lineText.trim();
                     if (!clean) return true;
                     // 过滤掉我们不关心的常规变动，包含了 defaultChoice 和 npmSpec 等新字段
-                    if (
-                      /^"?(name|version|private|description|type|openclaw|moltbot|devDependencies|peerDependencies|defaultChoice|npmSpec|localPath)"?\s*:/.test(
-                        clean,
-                      )
-                    )
+                    if (/^"?(version|devDependencies|defaultChoice|localPath)"?\s*:/.test(clean))
                       return true;
-                    if (clean.includes('"@openclaw/') || clean.includes('"@moltbot/')) return true;
                     if (clean.includes('"file:../../"')) return true;
 
                     // 匹配仅包含括号、逗号等语法的行
@@ -321,66 +319,21 @@ async function handlePackageJsonConflict(filePath) {
     const upstreamContent = await $`git show upstream/main:${filePath}`.text();
     const upstreamPkg = JSON.parse(upstreamContent);
 
-    let localPkg;
-    try {
-      // 优先从本地文件读取，如果不存在则从 HEAD 读取
-      const localContent = existsSync(filePath)
-        ? readFileSync(filePath, "utf8")
-        : await $`git show HEAD:${filePath}`.text();
-      localPkg = JSON.parse(localContent);
-    } catch {
-      // 若 HEAD 没有（说明是上游新增），基于上游内容创建
-      localPkg = { ...upstreamPkg };
-    }
-
     // 🌟 修复依赖丢失 Bug：以上游最新配置(upstreamPkg)为基准，确保不错过任何新增的 dependencies
     const updatedPkg = {
       ...upstreamPkg,
-      // 1. 更新名称命名空间
-      name: (upstreamPkg.name || localPkg.name || "").replace("@openclaw", "@moltbot"),
-      // 2. 同步上游版本
-      version: upstreamPkg.version,
-      // 3. 更新描述
-      description: (upstreamPkg.description || localPkg.description || "")?.replace(
-        /Open[Cc]law/gi,
-        "Moltbot",
-      ),
     };
 
-    // 4. 修正依赖：将 devDependencies 中的 openclaw 替换为 moltbot 并指向物理路径
+    // 🌟 修正依赖：将 devDependencies 中的 openclaw 替换为 moltbot 并指向物理路径
     if (updatedPkg.devDependencies && updatedPkg.devDependencies.openclaw) {
-      delete updatedPkg.devDependencies.openclaw;
+      updatedPkg.devDependencies.openclaw = "file:../../";
       updatedPkg.devDependencies.moltbot = "file:../../";
     }
 
-    // peerDependencies: openclaw -> moltbot (>=Version)
-    if (updatedPkg.peerDependencies && updatedPkg.peerDependencies.openclaw) {
-      delete updatedPkg.peerDependencies.openclaw;
-      // 自动设置为 >= 当前同步的版本号
-      updatedPkg.peerDependencies.moltbot = `>=${upstreamPkg.version}`;
-    }
-
-    // 5. 转换配置块名称 (openclaw -> moltbot)
-    if (updatedPkg.openclaw) {
-      updatedPkg.moltbot = updatedPkg.openclaw;
-      delete updatedPkg.openclaw;
-    }
-
-    // 🌟 替换安装默认包管理器为 bun
+    // 🌟 默认包为 local
     if (updatedPkg.moltbot && updatedPkg.moltbot.install) {
-      // 将 npmSpec 里的 openclaw 替换为 moltbot
-      if (updatedPkg.moltbot.install.npmSpec) {
-        updatedPkg.moltbot.install.npmSpec = updatedPkg.moltbot.install.npmSpec.replace(
-          "@openclaw",
-          "@moltbot",
-        );
-      }
-      // 强制将 defaultChoice 改为 bun
-      if (
-        updatedPkg.moltbot.install.defaultChoice === "npm" ||
-        updatedPkg.moltbot.install.defaultChoice === "pnpm"
-      ) {
-        updatedPkg.moltbot.install.defaultChoice = "bun";
+      if (updatedPkg.moltbot.install.defaultChoice === "npm") {
+        updatedPkg.moltbot.install.defaultChoice = "local";
       }
     }
 

@@ -402,9 +402,17 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
       ...(pluginSdkAlias || pluginSdkAccountIdAlias
         ? {
             alias: {
-              ...(pluginSdkAlias ? { "openclaw/plugin-sdk": pluginSdkAlias } : {}),
+              ...(pluginSdkAlias
+                ? {
+                    "moltbot/plugin-sdk": pluginSdkAlias,
+                    "openclaw/plugin-sdk": pluginSdkAlias,
+                  }
+                : {}),
               ...(pluginSdkAccountIdAlias
-                ? { "openclaw/plugin-sdk/account-id": pluginSdkAccountIdAlias }
+                ? {
+                    "moltbot/plugin-sdk/account-id": pluginSdkAccountIdAlias,
+                    "openclaw/plugin-sdk/account-id": pluginSdkAccountIdAlias,
+                  }
                 : {}),
             },
           }

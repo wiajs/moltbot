@@ -1,11 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
-import { MANIFEST_KEY } from "../compat/legacy-names.js";
+import { MANIFEST_KEY, LEGACY_MANIFEST_KEYS } from "../compat/legacy-names.js";
 import { isRecord } from "../utils.js";
 import type { PluginConfigUiHint, PluginKind } from "./types.js";
 
-export const PLUGIN_MANIFEST_FILENAME = "openclaw.plugin.json";
-export const PLUGIN_MANIFEST_FILENAMES = [PLUGIN_MANIFEST_FILENAME] as const;
+export const PLUGIN_MANIFEST_FILENAME = "moltbot.plugin.json";
+export const PLUGIN_MANIFEST_FILENAMES = [
+  PLUGIN_MANIFEST_FILENAME,
+  "openclaw.plugin.json",
+] as const;
 
 export type PluginManifest = {
   id: string;
@@ -147,5 +150,19 @@ export function getPackageManifestMetadata(
   if (!manifest) {
     return undefined;
   }
-  return manifest[MANIFEST_KEY];
+
+  // 1. Try primary key (e.g. "moltbot")
+  if (manifest[MANIFEST_KEY]) {
+    return manifest[MANIFEST_KEY];
+  }
+
+  // 2. Try legacy keys (e.g. "openclaw") for smooth migration
+  for (const legacyKey of LEGACY_MANIFEST_KEYS) {
+    const candidate = (manifest as Record<string, unknown>)[legacyKey];
+    if (candidate) {
+      return candidate as OpenClawPackageManifest;
+    }
+  }
+
+  return undefined;
 }
