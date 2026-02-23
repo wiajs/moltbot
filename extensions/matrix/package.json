@@ -1,7 +1,7 @@
 {
-  "name": "@moltbot/matrix",
+  "name": "@openclaw/matrix",
   "version": "2026.2.22",
-  "description": "Moltbot Matrix channel plugin",
+  "description": "OpenClaw Matrix channel plugin",
   "type": "module",
   "dependencies": {
     "@matrix-org/matrix-sdk-crypto-nodejs": "^0.4.0",
@@ -11,9 +11,9 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "moltbot": "file:../../"
+    "openclaw": "workspace:*"
   },
-  "moltbot": {
+  "openclaw": {
     "extensions": [
       "./index.ts"
     ],
@@ -28,9 +28,9 @@
       "quickstartAllowFrom": true
     },
     "install": {
-      "npmSpec": "@moltbot/matrix",
+      "npmSpec": "@openclaw/matrix",
       "localPath": "extensions/matrix",
-      "defaultChoice": "bun"
+      "defaultChoice": "local"
     }
   }
 }

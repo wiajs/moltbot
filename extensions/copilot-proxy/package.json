@@ -1,13 +1,13 @@
 {
-  "name": "@moltbot/copilot-proxy",
+  "name": "@openclaw/copilot-proxy",
   "version": "2026.2.22",
   "private": true,
-  "description": "Moltbot Copilot Proxy provider plugin",
+  "description": "OpenClaw Copilot Proxy provider plugin",
   "type": "module",
   "devDependencies": {
-    "moltbot": "file:../../"
+    "openclaw": "workspace:*"
   },
-  "moltbot": {
+  "openclaw": {
     "extensions": [
       "./index.ts"
     ]

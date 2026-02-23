@@ -1,12 +1,12 @@
 {
-  "name": "@moltbot/discord",
+  "name": "@openclaw/discord",
   "version": "2026.2.22",
-  "description": "Moltbot Discord channel plugin",
+  "description": "OpenClaw Discord channel plugin",
   "type": "module",
   "devDependencies": {
-    "moltbot": "file:../../"
+    "openclaw": "workspace:*"
   },
-  "moltbot": {
+  "openclaw": {
     "extensions": [
       "./index.ts"
     ]

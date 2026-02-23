@@ -1,12 +1,12 @@
 {
-  "name": "@moltbot/irc",
+  "name": "@openclaw/irc",
   "version": "2026.2.22",
-  "description": "Moltbot IRC channel plugin",
+  "description": "OpenClaw IRC channel plugin",
   "type": "module",
   "devDependencies": {
-    "moltbot": "file:../../"
+    "openclaw": "workspace:*"
   },
-  "moltbot": {
+  "openclaw": {
     "extensions": [
       "./index.ts"
     ]

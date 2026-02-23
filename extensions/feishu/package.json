@@ -1,7 +1,7 @@
 {
-  "name": "@moltbot/feishu",
+  "name": "@openclaw/feishu",
   "version": "2026.2.22",
-  "description": "Moltbot Feishu/Lark channel plugin (community maintained by @m1heng)",
+  "description": "OpenClaw Feishu/Lark channel plugin (community maintained by @m1heng)",
   "type": "module",
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.59.0",
@@ -9,9 +9,9 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "moltbot": "file:../../"
+    "openclaw": "workspace:*"
   },
-  "moltbot": {
+  "openclaw": {
     "extensions": [
       "./index.ts"
     ],
@@ -29,9 +29,9 @@
       "quickstartAllowFrom": true
     },
     "install": {
-      "npmSpec": "@moltbot/feishu",
+      "npmSpec": "@openclaw/feishu",
       "localPath": "extensions/feishu",
-      "defaultChoice": "bun"
+      "defaultChoice": "local"
     }
   }
 }

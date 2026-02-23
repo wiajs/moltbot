@@ -1,13 +1,15 @@
 {
-  "name": "@moltbot/synology-chat",
+  "name": "@openclaw/synology-chat",
   "version": "2026.2.22",
-  "private": true,
-  "description": "Synology Chat channel plugin for Moltbot",
+  "description": "Synology Chat channel plugin for OpenClaw",
   "type": "module",
-  "devDependencies": {
-    "moltbot": "file:../../"
+  "dependencies": {
+    "zod": "^4.3.6"
   },
-  "moltbot": {
+  "devDependencies": {
+    "openclaw": "workspace:*"
+  },
+  "openclaw": {
     "extensions": [
       "./index.ts"
     ],
@@ -21,9 +23,9 @@
       "order": 90
     },
     "install": {
-      "npmSpec": "@moltbot/synology-chat",
+      "npmSpec": "@openclaw/synology-chat",
       "localPath": "extensions/synology-chat",
-      "defaultChoice": "bun"
+      "defaultChoice": "local"
     }
   }
 }
