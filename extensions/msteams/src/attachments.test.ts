@@ -48,6 +48,53 @@ const runtimeStub = {
   },
 } as unknown as PluginRuntime;
 
+type AttachmentsModule = typeof import("./attachments.js");
+type DownloadAttachmentsParams = Parameters<AttachmentsModule["downloadMSTeamsAttachments"]>[0];
+type DownloadGraphMediaParams = Parameters<AttachmentsModule["downloadMSTeamsGraphMedia"]>[0];
+
+const DEFAULT_MESSAGE_URL = "https://graph.microsoft.com/v1.0/chats/19%3Achat/messages/123";
+const DEFAULT_MAX_BYTES = 1024 * 1024;
+const DEFAULT_ALLOW_HOSTS = ["x"];
+
+const createOkFetchMock = (contentType: string, payload = "png") =>
+  vi.fn(async () => {
+    return new Response(Buffer.from(payload), {
+      status: 200,
+      headers: { "content-type": contentType },
+    });
+  });
+
+const buildDownloadParams = (
+  attachments: DownloadAttachmentsParams["attachments"],
+  overrides: Partial<
+    Omit<DownloadAttachmentsParams, "attachments" | "maxBytes" | "allowHosts" | "resolveFn">
+  > &
+    Pick<DownloadAttachmentsParams, "allowHosts" | "resolveFn"> = {},
+): DownloadAttachmentsParams => {
+  return {
+    attachments,
+    maxBytes: DEFAULT_MAX_BYTES,
+    allowHosts: DEFAULT_ALLOW_HOSTS,
+    resolveFn: publicResolveFn,
+    ...overrides,
+  };
+};
+
+const buildDownloadGraphParams = (
+  fetchFn: typeof fetch,
+  overrides: Partial<
+    Omit<DownloadGraphMediaParams, "messageUrl" | "tokenProvider" | "maxBytes">
+  > = {},
+): DownloadGraphMediaParams => {
+  return {
+    messageUrl: DEFAULT_MESSAGE_URL,
+    tokenProvider: { getAccessToken: vi.fn(async () => "token") },
+    maxBytes: DEFAULT_MAX_BYTES,
+    fetchFn,
+    ...overrides,
+  };
+};
+
 describe("msteams attachments", () => {
   const load = async () => {
     return await import("./attachments.js");
@@ -133,12 +180,12 @@ describe("msteams attachments", () => {
   describe("downloadMSTeamsAttachments", () => {
     it("downloads and stores image contentUrl attachments", async () => {
       const { downloadMSTeamsAttachments } = await load();
-      const fetchMock = vi.fn(async () => {
-        return new Response(Buffer.from("png"), {
-          status: 200,
-          headers: { "content-type": "image/png" },
-        });
-      });
+      const fetchMock = createOkFetchMock("image/png");
+      const media = await downloadMSTeamsAttachments(
+        buildDownloadParams([{ contentType: "image/png", contentUrl: "https://x/img" }], {
+          fetchFn: fetchMock as unknown as typeof fetch,
+        }),
+      );
 
       const media = await downloadMSTeamsAttachments({
         attachments: [{ contentType: "image/png", contentUrl: "https://x/img" }],
@@ -156,12 +203,18 @@ describe("msteams attachments", () => {
 
     it("supports Teams file.download.info downloadUrl attachments", async () => {
       const { downloadMSTeamsAttachments } = await load();
-      const fetchMock = vi.fn(async () => {
-        return new Response(Buffer.from("png"), {
-          status: 200,
-          headers: { "content-type": "image/png" },
-        });
-      });
+      const fetchMock = createOkFetchMock("image/png");
+      const media = await downloadMSTeamsAttachments(
+        buildDownloadParams(
+          [
+            {
+              contentType: "application/vnd.microsoft.teams.file.download.info",
+              content: { downloadUrl: "https://x/dl", fileType: "png" },
+            },
+          ],
+          { fetchFn: fetchMock as unknown as typeof fetch },
+        ),
+      );
 
       const media = await downloadMSTeamsAttachments({
         attachments: [
@@ -182,12 +235,7 @@ describe("msteams attachments", () => {
 
     it("downloads non-image file attachments (PDF)", async () => {
       const { downloadMSTeamsAttachments } = await load();
-      const fetchMock = vi.fn(async () => {
-        return new Response(Buffer.from("pdf"), {
-          status: 200,
-          headers: { "content-type": "application/pdf" },
-        });
-      });
+      const fetchMock = createOkFetchMock("application/pdf", "pdf");
       detectMimeMock.mockResolvedValueOnce("application/pdf");
       saveMediaBufferMock.mockResolvedValueOnce({
         path: "/tmp/saved.pdf",
@@ -237,16 +285,14 @@ describe("msteams attachments", () => {
     it("stores inline data:image base64 payloads", async () => {
       const { downloadMSTeamsAttachments } = await load();
       const base64 = Buffer.from("png").toString("base64");
-      const media = await downloadMSTeamsAttachments({
-        attachments: [
+      const media = await downloadMSTeamsAttachments(
+        buildDownloadParams([
           {
             contentType: "text/html",
             content: `<img src="data:image/png;base64,${base64}" />`,
           },
-        ],
-        maxBytes: 1024 * 1024,
-        allowHosts: ["x"],
-      });
+        ]),
+      );
 
       expect(media).toHaveLength(1);
       expect(saveMediaBufferMock).toHaveBeenCalled();
@@ -315,12 +361,13 @@ describe("msteams attachments", () => {
     it("skips urls outside the allowlist", async () => {
       const { downloadMSTeamsAttachments } = await load();
       const fetchMock = vi.fn();
-      const media = await downloadMSTeamsAttachments({
-        attachments: [{ contentType: "image/png", contentUrl: "https://evil.test/img" }],
-        maxBytes: 1024 * 1024,
-        allowHosts: ["graph.microsoft.com"],
-        fetchFn: fetchMock as unknown as typeof fetch,
-      });
+      const media = await downloadMSTeamsAttachments(
+        buildDownloadParams([{ contentType: "image/png", contentUrl: "https://evil.test/img" }], {
+          allowHosts: ["graph.microsoft.com"],
+          resolveFn: undefined,
+          fetchFn: fetchMock as unknown as typeof fetch,
+        }),
+      );
 
       expect(media).toHaveLength(0);
       expect(fetchMock).not.toHaveBeenCalled();
@@ -388,12 +435,9 @@ describe("msteams attachments", () => {
         return new Response("not found", { status: 404 });
       });
 
-      const media = await downloadMSTeamsGraphMedia({
-        messageUrl: "https://graph.microsoft.com/v1.0/chats/19%3Achat/messages/123",
-        tokenProvider: { getAccessToken: vi.fn(async () => "token") },
-        maxBytes: 1024 * 1024,
-        fetchFn: fetchMock as unknown as typeof fetch,
-      });
+      const media = await downloadMSTeamsGraphMedia(
+        buildDownloadGraphParams(fetchMock as unknown as typeof fetch),
+      );
 
       expect(media.media).toHaveLength(1);
       expect(fetchMock).toHaveBeenCalled();
@@ -458,12 +502,9 @@ describe("msteams attachments", () => {
         return new Response("not found", { status: 404 });
       });
 
-      const media = await downloadMSTeamsGraphMedia({
-        messageUrl: "https://graph.microsoft.com/v1.0/chats/19%3Achat/messages/123",
-        tokenProvider: { getAccessToken: vi.fn(async () => "token") },
-        maxBytes: 1024 * 1024,
-        fetchFn: fetchMock as unknown as typeof fetch,
-      });
+      const media = await downloadMSTeamsGraphMedia(
+        buildDownloadGraphParams(fetchMock as unknown as typeof fetch),
+      );
 
       expect(media.media).toHaveLength(2);
     });
@@ -534,13 +575,11 @@ describe("msteams attachments", () => {
         return new Response("not found", { status: 404 });
       });
 
-      const media = await downloadMSTeamsGraphMedia({
-        messageUrl: "https://graph.microsoft.com/v1.0/chats/19%3Achat/messages/123",
-        tokenProvider: { getAccessToken: vi.fn(async () => "token") },
-        maxBytes: 1024 * 1024,
-        allowHosts: ["graph.microsoft.com", "contoso.sharepoint.com"],
-        fetchFn: fetchMock as unknown as typeof fetch,
-      });
+      const media = await downloadMSTeamsGraphMedia(
+        buildDownloadGraphParams(fetchMock as unknown as typeof fetch, {
+          allowHosts: ["graph.microsoft.com", "contoso.sharepoint.com"],
+        }),
+      );
 
       expect(media.media).toHaveLength(0);
       const calledUrls = fetchMock.mock.calls.map((call) => String(call[0]));

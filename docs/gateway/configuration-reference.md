@@ -1,6 +1,10 @@
 ---
 title: "Configuration Reference"
 description: "Complete field-by-field reference for ~/.openclaw/openclaw.json"
+summary: "Complete reference for every OpenClaw config key, defaults, and channel settings"
+read_when:
+  - You need exact field-level config semantics or defaults
+  - You are validating channel, model, gateway, or tool config blocks
 ---
 
 # Configuration Reference
@@ -35,7 +39,7 @@ All channels support DM policies and group policies:
 <Note>
 `channels.defaults.groupPolicy` sets the default when a provider's `groupPolicy` is unset.
 Pairing codes expire after 1 hour. Pending DM pairing requests are capped at **3 per channel**.
-Slack/Discord have a special fallback: if their provider section is missing entirely, runtime group policy can resolve to `open` (with a startup warning).
+If a provider block is missing entirely (`channels.<provider>` absent), runtime group policy falls back to `allowlist` (fail-closed) with a startup warning.
 </Note>
 
 ### Channel model overrides
@@ -161,7 +165,10 @@ WhatsApp runs through the gateway's web channel (Baileys Web). It starts automat
         maxDelayMs: 30000,
         jitter: 0.1,
       },
-      network: { autoSelectFamily: false },
+      network: {
+        autoSelectFamily: true,
+        dnsResultOrder: "ipv4first",
+      },
       proxy: "socks5://localhost:9050",
       webhookUrl: "https://example.com/telegram-webhook",
       webhookSecret: "secret",
@@ -711,9 +718,15 @@ Time format in system prompt. Default: `auto` (OS preference).
 }
 ```
 
+- `model`: accepts either a string (`"provider/model"`) or an object (`{ primary, fallbacks }`).
+  - String form sets only the primary model.
+  - Object form sets primary plus ordered failover models.
+- `imageModel`: accepts either a string (`"provider/model"`) or an object (`{ primary, fallbacks }`).
+  - Used by the `image` tool path as its vision-model config.
+  - Also used as fallback routing when the selected/default model cannot accept image input.
 - `model.primary`: format `provider/model` (e.g. `anthropic/claude-opus-4-6`). If you omit the provider, OpenClaw assumes `anthropic` (deprecated).
 - `models`: the configured model catalog and allowlist for `/model`. Each entry can include `alias` (shortcut) and `params` (provider-specific: `temperature`, `maxTokens`).
-- `imageModel`: only used if the primary model lacks image input.
+- Config writers that mutate these fields (for example `/models set`, `/models set-image`, and fallback add/remove commands) save canonical object form and preserve existing fallback lists when possible.
 - `maxConcurrent`: max parallel agent runs across sessions (each session still serialized). Default: 1.
 
 **Built-in alias shorthands** (only apply when the model is in `agents.defaults.models`):

@@ -1,10 +1,11 @@
 {
   "name": "@openclaw/irc",
-  "version": "2026.2.22",
+  "version": "2026.2.23",
   "description": "OpenClaw IRC channel plugin",
   "type": "module",
   "devDependencies": {
-    "openclaw": "workspace:*"
+    "moltbot": "file:../../",
+    "openclaw": "file:../../"
   },
   "openclaw": {
     "extensions": [

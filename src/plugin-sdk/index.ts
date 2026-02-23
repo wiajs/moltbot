@@ -133,6 +133,19 @@ export type {
   MSTeamsTeamConfig,
 } from "../config/types.js";
 export {
+  GROUP_POLICY_BLOCKED_LABEL,
+  resetMissingProviderGroupPolicyFallbackWarningsForTesting,
+  resolveAllowlistProviderRuntimeGroupPolicy,
+  resolveDefaultGroupPolicy,
+  resolveOpenProviderRuntimeGroupPolicy,
+  resolveRuntimeGroupPolicy,
+  type GroupPolicyDefaultsConfig,
+  type RuntimeGroupPolicyResolution,
+  type RuntimeGroupPolicyParams,
+  type ResolveProviderRuntimeGroupPolicyParams,
+  warnMissingProviderGroupPolicyFallbackOnce,
+} from "../config/runtime-group-policy.js";
+export {
   DiscordConfigSchema,
   GoogleChatConfigSchema,
   IMessageConfigSchema,
@@ -182,6 +195,12 @@ export {
 } from "../infra/device-pairing.js";
 export { createDedupeCache } from "../infra/dedupe.js";
 export type { DedupeCache } from "../infra/dedupe.js";
+export { createPersistentDedupe } from "./persistent-dedupe.js";
+export type {
+  PersistentDedupe,
+  PersistentDedupeCheckOptions,
+  PersistentDedupeOptions,
+} from "./persistent-dedupe.js";
 export { formatErrorMessage } from "../infra/errors.js";
 export {
   DEFAULT_WEBHOOK_BODY_TIMEOUT_MS,
@@ -482,3 +501,6 @@ export type { ProcessedLineMessage } from "../line/markdown-to-line.js";
 
 // Media utilities
 export { loadWebMedia, type WebMediaResult } from "../web/media.js";
+
+// Security utilities
+export { redactSensitiveText } from "../logging/redact.js";

@@ -116,12 +116,18 @@ async function runSync() {
   // 处理 extensions 目录
   if (existsSync(EXTENSIONS_DIR)) {
     const extensions = (await $`ls ${EXTENSIONS_DIR}`.text()).split("\n").filter(Boolean);
+    let cnt = 0;
+    let ver = "";
     for (const ext of extensions) {
       const pkgPath = join(EXTENSIONS_DIR, ext, "package.json");
       if (existsSync(pkgPath)) {
-        await handlePackageJsonConflict(pkgPath);
+        ver = await handlePackageJsonConflict(pkgPath);
+        cnt++;
       }
     }
+    console.log(
+      `  ${GREEN}✔${RESET} 已同步: ${EXTENSIONS_DIR}/${cnt} 个插件 package.json -> ${BLUE}${ver}${RESET}`,
+    );
   }
 
   console.log(`\n${BOLD}${GREEN}✅ 同步与自动化修复已完成！${RESET}`);
@@ -314,6 +320,7 @@ async function generateConflictReport(version) {
 }
 
 async function handlePackageJsonConflict(filePath) {
+  let R;
   try {
     // 获取上游内容
     const upstreamContent = await $`git show upstream/main:${filePath}`.text();
@@ -331,21 +338,24 @@ async function handlePackageJsonConflict(filePath) {
     }
 
     // 🌟 默认包为 local
-    if (updatedPkg.moltbot && updatedPkg.moltbot.install) {
-      if (updatedPkg.moltbot.install.defaultChoice === "npm") {
-        updatedPkg.moltbot.install.defaultChoice = "local";
+    if (updatedPkg.openclaw && updatedPkg.openclaw.install) {
+      if (updatedPkg.openclaw.install.defaultChoice === "npm") {
+        updatedPkg.openclaw.install.defaultChoice = "local";
       }
     }
 
     // 写入文件并暂存
     writeFileSync(filePath, JSON.stringify(updatedPkg, null, 2) + "\n");
     await $`git add ${filePath}`;
-    console.log(
-      `  ${GREEN}✔${RESET} 已同步插件: ${filePath} -> ${BLUE}${upstreamPkg.version}${RESET}`,
-    );
+    R = upstreamPkg.version;
+    // console.log(
+    //   `  ${GREEN}✔${RESET} 已同步插件: ${filePath} -> ${BLUE}${upstreamPkg.version}${RESET}`,
+    // );
   } catch (e) {
     console.error(`  ${RED}✘ 处理失败 ${filePath}: ${e.message}${RESET}`);
   }
+
+  return R;
 }
 
 // 执行主程序

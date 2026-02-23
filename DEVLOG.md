@@ -1,3 +1,8 @@
+find . -name "node_modules" -type d -prune -exec rm -rf '{}' +
+rm -f package-lock.json yarn.lock pnpm-lock.yaml bun.lockb  
+bun i
+bun moltbot.js gateway --port 18789 --verbose
+
 ## 插件系统
 
 1. 如何单独发布@openclaw/bluebubbles? 项目代码中有单独发布 插件的功能吗?  

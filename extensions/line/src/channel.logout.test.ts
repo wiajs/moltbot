@@ -1,10 +1,6 @@
-import type {
-  OpenClawConfig,
-  PluginRuntime,
-  ResolvedLineAccount,
-  RuntimeEnv,
-} from "openclaw/plugin-sdk";
+import type { OpenClawConfig, PluginRuntime, ResolvedLineAccount } from "openclaw/plugin-sdk";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createRuntimeEnv } from "../../test-utils/runtime-env.js";
 import { linePlugin } from "./channel.js";
 import { setLineRuntime } from "./runtime.js";
 

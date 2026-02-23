@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/twitch",
-  "version": "2026.2.22",
+  "version": "2026.2.23",
   "description": "OpenClaw Twitch channel plugin",
   "type": "module",
   "dependencies": {
@@ -10,7 +10,8 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "openclaw": "workspace:*"
+    "moltbot": "file:../../",
+    "openclaw": "file:../../"
   },
   "openclaw": {
     "extensions": [
