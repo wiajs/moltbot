@@ -3,6 +3,20 @@ rm -f package-lock.json yarn.lock pnpm-lock.yaml bun.lockb
 bun i
 bun moltbot.js gateway --port 18789 --verbose
 
+"general": {
+"ui": {
+"incrementalRendering": false
+}  
+ }
+
+Model Usage │
+│ Model Reqs Input Tokens Cache Reads Output Tokens │
+│ ──────────────────────────────────────────────────────────────────────────── │
+│ gemini-2.5-flash-lite 34 163,374 0 2,788 │
+│ gemini-3-flash-preview 132 1,183,406 4,263,333 31,280 │
+│ │
+│ Savings Highlight: 4,263,333 (76.0%) of input tokens were served from the cache, reducing costs.
+
 ## 插件系统
 
 1. 如何单独发布@openclaw/bluebubbles? 项目代码中有单独发布 插件的功能吗?  
